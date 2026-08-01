@@ -24,7 +24,7 @@ pnpm demo    # physical data → integrate → index → read → write → refu
 pnpm test    # the same behavior, as executable tests
 ```
 
-The demo uses the scenario from the [article this repository accompanies](https://note.com/gura105/n/nfe927c169c6a?hl=en). A company acquires a competitor and inherits **two legacy order systems with different schemas and status encodings**. A few dozen lines of SQL and a small TypeScript mapping integrate them, and the ontology models `Customer`, `Order`, and `Product` on top — plus `Note`, a type that exists in no source system. The demo then shows:
+The demo uses the scenario from the [article this repository accompanies](https://dev.to/gura105/operational-ontology-the-pattern-behind-palantir-foundrys-ontology-44m8). A company acquires a competitor and inherits **two legacy order systems with different schemas and status encodings**. A few dozen lines of SQL and a small TypeScript mapping integrate them, and the ontology models `Customer`, `Order`, and `Product` on top — plus `Note`, a type that exists in no source system. The demo then shows:
 
 - a link traversal answering "which orders contain this product?" across both systems
 - `assignOrder` writing state that exists in no legacy system — edits can live in a layer above the sources

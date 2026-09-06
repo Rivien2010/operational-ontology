@@ -9,10 +9,7 @@
 >
 > A semantic layer lets you *read* your business. An operational ontology lets you *run* it.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/hero-diagram-dark.svg">
-  <img src="./assets/hero-diagram.svg" alt="Reads travel from a shared model to agents, apps, and people. Writes enter through an audited action gate and write back to the systems of record that own the state.">
-</picture>
+<img src="./assets/hero-diagram.svg" alt="Reads travel from a shared model to agents, apps, and people. Writes enter through an audited action gate and write back to the systems of record that own the state.">
 
 Palantir Foundry's Ontology is one implementation of this pattern. This repository is another: a minimal reference implementation, small enough to read in one sitting. It exists to make the definition precise and runnable; it is not a framework. Fork it and reuse the ideas.
 
@@ -45,6 +42,8 @@ A system implements the pattern when all four properties hold. They constrain *w
 
 3. **Business rules at the action.** Preconditions check domain invariants ("a shipped order cannot be cancelled") and refuse violations with machine-readable errors. They are not access control, and not UI validation. Every attempt, applied or refused, is recorded in the audit log.
 
+   <img src="./assets/action-gate.svg" alt="Every caller — human or AI agent — invokes the named action cancelOrder through the same governed gate. The precondition refuses shipped orders with a machine-readable error; an applied call transitions the status. Every attempt, applied or refused, lands in the audit log. A generic UPDATE path is absent by design.">
+
 4. **Write-back to systems of record.** The model declares, for every piece of state, which system owns it. There are three kinds:
 
    - **source-backed** — state owned by an upstream system, such as an order's status mastered in the ERP. A change to it propagates back to that source as a governed, ordered side effect; the source stays authoritative.
@@ -52,6 +51,8 @@ A system implements the pattern when all four properties hold. They constrain *w
    - **derived** — computed state such as aggregates and counts. It is never written.
 
    What the property forbids is state with no declared owner: a local copy of source-owned data that is modified but never written back, or a write nobody can place. An implementation with no source-backed writes at all does not implement a smaller version of this pattern; it is an ordinary application with its own database.
+
+   <img src="./assets/authority-map.svg" alt="An authority map for an Order object. Status and total are source-backed by the upstream order system and use a governed write-back path. Assignee and Note are ontology-owned, making the ontology datastore their single source of truth. Aggregates and counts are derived, computed only, and never written. State with no declared owner is forbidden.">
 
 A quick test: **"Can you cancel an order from your semantic layer?"**
 
@@ -180,10 +181,7 @@ The type/instance split is a general one — formal ontology calls the sides TBo
 
 Three layers. This repository implements the middle one only.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/where-this-sits-dark.svg">
-  <img src="./assets/where-this-sits.svg" alt="Three layers — applications, the operational ontology, and the data layer — each mapped to its implementation in Foundry and in this repository. This repository implements the middle layer, which owns its own store. At the ontology–data seam sit the two contracts: integrated physical data is given, and write-back is a governed side effect.">
-</picture>
+<img src="./assets/where-this-sits.svg" alt="Three layers — applications, the operational ontology, and the data layer — each mapped to its implementation in Foundry and in this repository. This repository implements the middle layer, which owns its own store. At the ontology–data seam sit the two contracts: integrated physical data is given, and write-back is a governed side effect.">
 
 **Upstream contract (with the data platform):** integrated physical data is a given. Pipelines, dataset transactions, and rollback belong to the data platform.
 

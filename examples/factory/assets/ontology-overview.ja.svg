@@ -1,0 +1,125 @@
+<svg xml:lang="ja" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1230" role="img" aria-labelledby="title desc">
+  <title id="title">工場：出荷先を辿り、対応を記録する</title>
+  <desc id="desc">工場の全6オブジェクト型と全8リンク型。グレーはソース由来、オレンジはオントロジーが所有する状態。customerImpact が出荷済み明細の根拠を集計し、createContactTask が根拠を再検査して ContactTask と顧客・設備・ロット・明細へのリンクを作る。属性は抜粋。</desc>
+  <!-- Edit this SVG, then export its PNG at 2x with:
+       rsvg-convert -w 2400 -o ontology-overview.ja.png ontology-overview.ja.svg -->
+  <defs>
+    <style>text { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, "Hiragino Sans", "Noto Sans JP", sans-serif; }</style>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#5B626B"/></marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#C96A00"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1200" height="1230" rx="0" fill="#FFFFFF"/>
+  <text x="54" y="65" text-anchor="start" font-size="29" font-weight="760" fill="#20242A">工場：出荷先を辿り、対応を記録する</text>
+  <text x="54" y="101" text-anchor="start" font-size="19" font-weight="500" fill="#747B84">オブジェクト型 6 · リンク型 8 · Function 1 · Action 1</text>
+  <rect x="54" y="140" width="1092" height="630" rx="30" fill="#FFFFFF" stroke="#20242A" stroke-width="3"/>
+  <text x="84" y="183" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">オブジェクト型とリンク</text>
+  <text x="1116" y="183" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">主な属性を抜粋 · 主キー：id</text>
+  <!-- Schema arrows are declared from → to; they are not an exploration sequence. -->
+  <g data-link="producedOn" data-from="Equipment" data-to="Lot" data-kind="many-to-many">
+  <path d="M 328 282 H 488" fill="none" stroke="#5B626B" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-gray)"/>
+  <text x="408" y="265" text-anchor="middle" font-size="17" font-weight="650" fill="#5B626B">producedOn</text>
+  <text x="408" y="309" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">M:N</text>
+  </g>
+  <g data-link="lotLines" data-from="Lot" data-to="ShipmentLine" data-kind="one-to-many">
+  <path d="M 722 282 H 882" fill="none" stroke="#5B626B" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-gray)"/>
+  <text x="802" y="265" text-anchor="middle" font-size="17" font-weight="650" fill="#5B626B">lotLines</text>
+  <text x="802" y="309" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">1:N</text>
+  </g>
+  <g data-link="shipmentLines" data-from="Shipment" data-to="ShipmentLine" data-kind="one-to-many">
+  <path d="M 999 565 V 335" fill="none" stroke="#5B626B" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-gray)"/>
+  <rect x="911.0" y="429" width="176" height="54" rx="6" fill="#FFFFFF"/>
+  <text x="999" y="451" text-anchor="middle" font-size="17" font-weight="650" fill="#5B626B">shipmentLines</text>
+  <text x="999" y="475" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">1:N</text>
+  </g>
+  <g data-link="customerShipments" data-from="Customer" data-to="Shipment" data-kind="one-to-many">
+  <path d="M 722 617 H 882" fill="none" stroke="#5B626B" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-gray)"/>
+  <text x="802" y="598" text-anchor="middle" font-size="15.5" font-weight="650" fill="#5B626B">customerShipments</text>
+  <text x="802" y="642" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">1:N</text>
+  </g>
+  <g data-link="contactEquipment" data-from="ContactTask" data-to="Equipment" data-kind="many-to-many">
+  <path d="M 183 565 V 335" fill="none" stroke="#C96A00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <rect x="93.0" y="429" width="176" height="54" rx="6" fill="#FFFFFF"/>
+  <text x="181" y="451" text-anchor="middle" font-size="17" font-weight="650" fill="#C96A00">contactEquipment</text>
+  <text x="181" y="475" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">M:N</text>
+  </g>
+  <g data-link="contactLots" data-from="ContactTask" data-to="Lot" data-kind="many-to-many">
+  <path d="M 260 565 V 410 H 600 V 335" fill="none" stroke="#C96A00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <text x="430" y="394" text-anchor="middle" font-size="17" font-weight="650" fill="#C96A00">contactLots</text>
+  <text x="430" y="438" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">M:N</text>
+  </g>
+  <g data-link="contactLines" data-from="ContactTask" data-to="ShipmentLine" data-kind="many-to-many">
+  <path d="M 300 565 V 511 H 815 V 316 H 882" fill="none" stroke="#C96A00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <text x="570" y="494" text-anchor="middle" font-size="17" font-weight="650" fill="#C96A00">contactLines</text>
+  <text x="570" y="538" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">M:N</text>
+  </g>
+  <g data-link="customerContacts" data-from="Customer" data-to="ContactTask" data-kind="one-to-many">
+  <path d="M 488 617 H 328" fill="none" stroke="#C96A00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <text x="408" y="598" text-anchor="middle" font-size="15.5" font-weight="650" fill="#C96A00">customerContacts</text>
+  <text x="408" y="642" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">1:N</text>
+  </g>
+  <g data-object="Equipment" data-properties="inspection inspectedAt">
+  <rect x="94" y="230" width="234" height="105" rx="21" fill="#F8F9FA" stroke="#343A42" stroke-width="2.5"/>
+  <text x="114" y="265" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Equipment</text>
+  <text x="114" y="294" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">inspection</text>
+  <text x="114" y="318" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">inspectedAt</text>
+  </g>
+  <g data-object="Lot" data-properties="family units manufacturedAt">
+  <rect x="488" y="230" width="234" height="105" rx="21" fill="#F8F9FA" stroke="#343A42" stroke-width="2.5"/>
+  <text x="508" y="265" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Lot</text>
+  <text x="508" y="294" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">family · units</text>
+  <text x="508" y="318" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">manufacturedAt</text>
+  </g>
+  <g data-object="ShipmentLine" data-properties="units">
+  <rect x="882" y="230" width="234" height="105" rx="21" fill="#F8F9FA" stroke="#343A42" stroke-width="2.5"/>
+  <text x="902" y="265" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">ShipmentLine</text>
+  <text x="902" y="294" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">units</text>
+  </g>
+  <g data-object="ContactTask" data-properties="reason after before">
+  <rect x="94" y="565" width="234" height="105" rx="21" fill="#FFF1DE" stroke="#C96A00" stroke-width="2.5"/>
+  <text x="114" y="600" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">ContactTask</text>
+  <text x="114" y="629" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">reason</text>
+  <text x="114" y="653" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">after · before</text>
+  </g>
+  <g data-object="Customer" data-properties="name region">
+  <rect x="488" y="565" width="234" height="105" rx="21" fill="#F8F9FA" stroke="#343A42" stroke-width="2.5"/>
+  <text x="508" y="600" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Customer</text>
+  <text x="508" y="629" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">name · region</text>
+  </g>
+  <g data-object="Shipment" data-properties="status shippedAt">
+  <rect x="882" y="565" width="234" height="105" rx="21" fill="#F8F9FA" stroke="#343A42" stroke-width="2.5"/>
+  <text x="902" y="600" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Shipment</text>
+  <text x="902" y="629" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">status · shippedAt</text>
+  </g>
+  <!-- Ownership colors match the main README authority map. -->
+  <path d="M 84 720 H 120" stroke="#5B626B" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <text x="133" y="725" text-anchor="start" font-size="17" font-weight="600" fill="#5B626B">ソース由来</text>
+  <path d="M 320 720 H 356" stroke="#C96A00" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <text x="369" y="725" text-anchor="start" font-size="17" font-weight="600" fill="#C96A00">オントロジー所有</text>
+  <text x="655" y="725" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">矢印は定義上の from → to。</text>
+  <text x="84" y="751" text-anchor="start" font-size="16" font-weight="500" fill="#747B84">1:N = 1対多 · M:N = 多対多</text>
+  <text x="655" y="751" text-anchor="start" font-size="16" font-weight="500" fill="#747B84">リンクはどちらの端からも pivot できます。</text>
+  <text x="54" y="812" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">モデルに定義した操作</text>
+  <rect x="54" y="835" width="530" height="314" rx="24" fill="#F8F9FA" stroke="#5B626B" stroke-width="2.5"/>
+  <rect x="610" y="835" width="536" height="314" rx="24" fill="#FFF1DE" stroke="#C96A00" stroke-width="2.5"/>
+  <text x="80" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#5B626B" letter-spacing="1">Function · 読み取り専用</text>
+  <path d="M 644 853 L 656 866 L 644 879 L 632 866 Z" fill="#FFFFFF" stroke="#C96A00" stroke-width="2"/>
+  <text x="670" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#C96A00" letter-spacing="1">Action · ルール検査と監査</text>
+  <g data-function="customerImpact">
+  <text x="80" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">customerImpact</text>
+  <text x="80" y="950" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">lotIds → Customer の集計と根拠</text>
+  <text x="80" y="984" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">指標：affectedUnits · shipmentCount</text>
+  <text x="80" y="1018" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">根拠：出荷済みの ShipmentLine 集合</text>
+  </g>
+  <text x="80" y="1082" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">未出荷・対象外の明細を除外する。</text>
+  <text x="80" y="1122" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">数量は出荷明細の粒度で計算する。</text>
+  <g data-action="createContactTask">
+  <text x="636" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">createContactTask</text>
+  <text x="636" y="954" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">顧客 + 設備 + 製造期間 + 出荷明細ID</text>
+  <text x="636" y="988" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">設備の異常・期間・出荷済みの根拠を再検査。</text>
+  <text x="636" y="1022" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">ContactTask と4種類の所有リンクを作成。</text>
+  <text x="636" y="1056" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">選んだロットと明細を根拠として保持する。</text>
+  <text x="636" y="1122" text-anchor="start" font-size="17" font-weight="650" fill="#C96A00">タスクを記録。メッセージは送信しない。</text>
+  </g>
+  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">探索 → 根拠を確認 → 顧客を選択 → preview → Action を実行</text>
+  <text x="1146" y="1214" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Operational Ontology · 工場の例</text>
+</svg>

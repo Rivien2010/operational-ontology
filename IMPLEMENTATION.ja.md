@@ -6,20 +6,32 @@
 
 アクション実行の拒否は `{ ok: false, error: { code, message } }` として返り、監査されます。preview は同じ結果形式を使いますが監査しません。プログラムやストレージのエラーは例外になる場合があり、書き込み経路では後述のとおり記録します。クエリのエラーは、アクションの拒否ではなく例外です。
 
+## コードの分担
+
+利用側の入口は引き続き `Runtime` です。クエリ用のクラスやストレージのインターフェース階層は作らず、次の責務で分けます。
+
+| ファイル | 責務 |
+| --- | --- |
+| `model.ts` | 定義、インスタンスの形、モデルから導く型。 |
+| `core.ts` | actor を伴う読み取り、公開クエリ API、`run` / `preview`、Action の検査経路。 |
+| `query.ts` | 取得済みの集合・集計に対する純粋な操作と、MCP と共有する構造化条件。 |
+| `store.ts` | SQLite の保存、インデックス、整合性検査、編集、ローカルの編集と監査の原子的コミット。 |
+| `mcp.ts` | モデルからツールを生成し、入力を同じランタイム操作へ渡す。 |
+
 ## インスタンスと走査
 
-`model.ts` に定義とモデルから導く型を置き、`core.ts` がそれを解釈します。実行時のオブジェクトは `{ type, pk, properties }` という読み取り時点のスナップショットです。同一性は `(type, pk)` で決まります。`pk` は宣言された主キーの値なので、プロパティ名が `id` でなくても扱えます。業務プロパティに `type`・`pk`・`properties` という名前があっても、内側に入るため衝突しません。スナップショットを書き換えてもストアは変わりません。
+実行時のオブジェクトは `{ type, pk, properties }` という読み取り時点のスナップショットです。同一性は `(type, pk)` で決まります。`pk` は宣言された主キーの値なので、プロパティ名が `id` でなくても扱えます。業務プロパティに `type`・`pk`・`properties` という名前があっても、内側に入るため衝突しません。スナップショットを書き換えてもストアは変わりません。
 
-`get`・`search`・`traverse` はインスタンスを返します。visibility、述語フィルタ、集計コールバック、アクションのコンテキスト、`meta.target` も同じ形を受け取ります。等値フィルタ、`modify` の変更内容、`create` の data、インデックスに渡す行は、業務プロパティを直接指定します。`defineAction(objects, …)` は `object` の名前から `ctx.object` を、パラメータスキーマから `ctx.params` を型付けします。`modify(instance, changes)` は既存の edit データを作るだけで、書き込みは行いません。`create`・`link`・`unlink` の編集内容は引き続き実行時に検査します。
+`get` はインスタンスまたは `undefined` を、`search`・`traverse`・`pivot` は `ObjectSet` を返します。visibility、オブジェクト用の述語フィルタ、アクションのコンテキスト、`meta.target` はインスタンスを受け取ります。`modify` の変更内容、`create` の data、インデックスに渡す行には業務プロパティを直接指定します。`defineAction(objects, …)` は `object` の名前から `ctx.object` を、パラメータスキーマから `ctx.params` を型付けします。`modify(instance, changes)` は編集を記述するだけで、書き込みません。`create`・`link`・`unlink` の編集内容は引き続き実行時に検査します。
 
 注文デモでは、リンクのどちら側からも走査できます。
 
 ```ts
 const hq = { actor: 'user:hq' }
 const customer = rt.get('Customer', 'N-C01', hq)!
-const orders = rt.traverse(customer, 'customerOrders', hq) // Order のインスタンス配列
-const customers = rt.traverse(orders[0], 'customerOrders', hq) // Customer のインスタンス配列
-console.log(orders[0].properties.status)
+const orders = rt.traverse(customer, 'customerOrders', hq) // ObjectSet<Order>
+const customers = rt.traverse(orders.objects[0], 'customerOrders', hq) // ObjectSet<Customer>
+console.log(orders.objects[0].properties.status)
 ```
 
 TypeScript は、オブジェクト型名・アクション名・インスタンスのプロパティ・アクションの params・`modify` の変更内容をモデルから導きます。定義の推論された型を保ってください。`OntologyDef` と明示的に注釈すると、具体的な名前とスキーマの型情報は失われます。実行時の検証は引き続き働きます。
@@ -37,13 +49,76 @@ TypeScript は、オブジェクト型名・アクション名・インスタン
 
 上司から部下への `Employee → Employee` リンクなら、`forward` は部下、`reverse` は上司を取得します。リンク名は既存の1つを使い、方向別の別名は設けません。
 
-判定基準は定義上の型で、実データのつながり方には依存しません。戻り値は one-to-many の逆方向でも常に配列です。要素型は始点とリンクから決まり、direction の省略可能性によって広がりません。始点が異なる型の union の場合は、`type` で絞り込んでから走査してください。入力はスナップショットなので、走査時には `(type, pk)` を呼び出し元の actor で読み直し、両端の visibility を検査します。始点が存在しない・見えない場合は空配列です。これらの判定に入力の properties は使いません。インスタンスの形、リンク、方向が不正なら例外になります。
+判定基準は定義上の型で、実データのつながり方には依存しません。one-to-many の逆方向でも集合を返します。戻り値の型は始点とリンクで決まり、任意の direction によって広がりません。異なる始点型の union は、`type` で絞ってから走査します。走査は `(type, pk)` を呼び出し元の actor で読み直し、両端の可視性を検査します。渡された properties はこの判定に使いません。始点が欠損・非表示なら、行き先の型を保持した空集合を返します。不正な始点の形、リンク、方向は例外です。
+
+`pivot(set, linkName, { actor, direction? })` は各始点に同じ規則を適用し、行き先を重複排除します。入力が空でもリンクと方向を検査します。一度訪れた型へ戻っても、取得するのは現在の集合に関係するインスタンスであり、元の集合やその型の全件ではありません。
 
 MCP の読み取りも同じ形を返します。走査ツールの引数は `{ source: { type, pk, properties }, direction? }` で、同じ型同士のリンクではスキーマ上も direction が必須です。動的な入力は生成スキーマとランタイムが検査し、この境界の型アサーションは MCP アダプタに置きます。型付きのアプリケーション API に任意の文字列を許すオーバーロードは追加しません。ストアの行と監査ログの edit データの形式は変わりません。
 
+## ObjectSet・filter・集合演算・集計
+
+`ObjectSet<O>` は `{ type, objects }`、つまり1種類のオブジェクト型と、そのインスタンス配列を持つ取得済みの集合です。空でも型を保持します。同一性は `(type, pk)` で決まり、重複は最初の要素を残します。`objectSet(type, objects)` で構築・検査できます。TypeScript ではタグと配列を readonly にし、集合型の union でもタグと要素型の対応を保ちます。実行時も異なるタグの混在を拒否します。深い freeze ではなく、properties は読み取り時点の値で、集合操作の結果が同じインスタンス値を共有する場合があります。
+
+`filter`・`union`・`intersect`・`subtract`・`aggregate` は、取得済みの値に対する操作です。actor を受け取らず、ストアを読みません。新しい入れ物を返し、ストアの更新や監査記録はしません。集合演算は同じ型同士だけで行います。和集合は左の要素と右だけにある要素の順、積集合・差集合は左の順と値を保ちます。鮮度の比較はせず、同じ ID の値は左を優先します。現在の状態が必要なら読み取りや Function を再実行してください。
+
+```ts
+const orders = rt.search('Order', { actor: 'user:hq' })
+const pending = rt.filter(orders, [{ property: 'status', op: 'eq', value: 'pending' }])
+const large = rt.filter(orders, (order) => order.properties.total >= 10000)
+const either = rt.union(pending, large)       // OR
+const both = rt.intersect(pending, large)   // 集合同士の AND
+const remaining = rt.subtract(orders, both)
+```
+
+構造化条件は `{ property, op, value }` の配列で、すべてを AND で結びます。プロパティ・演算子・値をモデルから型推論し、空集合に対しても実行時に検査します。`search` の任意の `filter` オプションにも同じ条件を渡せます。以前の `{ status: 'pending' }` という等値条件の省略形は残しません。コールバックは同期的な TypeScript の述語で、副作用を起こしてはいけません。MCP には送れません。
+
+| 属性 | 演算子 |
+| --- | --- |
+| 文字列・文字列 enum | `eq`・`ne`・`in`・`contains`。大文字と小文字を区別する。 |
+| 数値 | `eq`・`ne`・`in`・`gt`・`gte`・`lt`・`lte`。 |
+| 真偽値 | `eq`・`ne`・`in`。 |
+| ISO 日付・日時 | `eq`・`ne`・`in`・`gt`・`gte`・`lt`・`lte`。 |
+
+日付には `z.iso.date()`、日時には `z.iso.datetime({ offset: true })` を使うと、エディタも普通の文字列と区別できます。日時はオフセットを含めた時点で比較し、日付は比較時に UTC の午前0時として扱います。保存形式は JSON 文字列です。数値への暗黙の文字列変換はしません。対応するスカラーの optional・nullable・default は認識しますが、null・欠損値の比較、それらをキーにする集計や sum は定義外として例外にし、暗黙に0にはしません。ネストした属性、配列の条件、異なる値型を混ぜたスキーマは構造化条件の対象外です。OR は和集合、NOT は明示した元集合からの差集合で表します。
+
+`aggregate(set, { groupBy, sum? })` は1つのスカラー属性でグループ化し、必ず `count`、任意で1つの数値属性の `sum` を求めます。結果は次の3つを持ちます。
+
+- `set`：各グループに属する入力オブジェクトの集合。
+- `columns`：`{ count: 'number', sum: 'number' }` など、集計列名と実行時の型情報。
+- `values`：スカラーの `key`、対応するオブジェクトの `pks`、宣言した数値の集計列を持つ行。
+
+```ts
+const grouped = rt.aggregate(pending, { groupBy: 'status', sum: 'total' })
+const selected = rt.filter(grouped, [{ property: 'sum', op: 'gte', value: 10000 }])
+console.log(selected.values) // 選択された行。集計値は元の値を保つ。
+const targets = selected.set // その行に属する Order の集合
+```
+
+`having` という別メソッドは作りません。集計結果への filter は数値の集計列で行を選び、対応するオブジェクトの和集合を残します。集計値は再計算しません。属性で絞りたければ `.set` を filter し、必要なら明示的に再集計します。0行になっても空の型付き集合と列定義を保持します。groupBy の属性が別の型の ID であっても、その型へ自動的に pivot はしません。
+
+モデルの Function も、同じ `AggregationResult<O, Columns>` を返せます。例えば金融では、**取引**から求めた `senderCount`・`transactionCount`・`totalAmount` を、対象の**口座**集合に対応させます。`aggregationResult(set, columns, values)` は有限の数値、グループキーの一意性、メンバーの参照を検査し、対応する集合を作ります。列名は TypeScript の補完と MCP の検査にも使います。行の `pks` は対象集合の ID であり、自動的に根拠レコードを意味するものではありません。根拠集合は Function の結果で集計と並べて返し、利用者が選んだ対象に対応するものを取り出します。自動的な経路履歴、再帰的な走査、任意の transform、結合、汎用的な集計言語は実装しません。
+
+## MCP のクエリ入力
+
+モデルから `search_<type>`・`get_<type>`・`filter_<type>`・`union_<type>`・`intersect_<type>`・`subtract_<type>`・`aggregate_<type>` と、`traverse_<link>`・`pivot_<link>` を生成します。
+
+| ツール | 入力 |
+| --- | --- |
+| `search_<type>` | `{ where?: conditions }` |
+| `get_<type>` | `{ <primaryKey>: value }` |
+| `filter_<type>` | `{ source: { pks: [...] }, where: conditions }`。集計結果を `source` に渡すこともできる。 |
+| `union/intersect/subtract_<type>` | `{ left: pks, right: pks }` |
+| `aggregate_<type>` | `{ pks, group_by, sum?, where? }` |
+| `traverse_<link>` | `{ source: { type, pk, properties }, direction? }` |
+| `pivot_<link>` | `{ source: { type, pks }, direction? }` |
+
+オブジェクトの集合は `{ type, objects }` で返します。主キーで受け取った入力はセッションの actor で読み直し、渡されたスナップショットを可視性の根拠にはしません。条件の定義と評価器は TypeScript と共通です。任意のコードや SQL は受け取りません。
+
+集計結果を入力すると、`filter_<type>` は数値列の宣言とメンバーの対応を検査して対象を読み直し、欠損・非表示の対象を1つでも含むグループを丸ごと除きます。渡された集計値は呼び出し元が持つ分析時点の値のままで、サーバーは再計算も由来・鮮度の保証もしません。Action は examples のように、現在の入力と根拠を独自に検査する必要があります。次の探索には集計結果の `.set` を使います。根拠などを追加した Function の外側の戻り値全体は、集計結果そのものではありません。
+
 ## 可視性と呼び出し元の identity
 
-`get`・`search`・`traverse`・`aggregate` はすべて `actor` を受け取ります。オブジェクト型に付けた省略可能な `visibility` 述語が、読み取りとアクションの対象を絞ります。見えないオブジェクトは存在しないものと同じ扱いで、`get` は `undefined` を返し、走査結果にも現れず、アクションの対象なら `TARGET_NOT_FOUND` で拒否されます。
+`get`・`search`・`traverse`・`pivot` は `actor` を受け取ります。取得済み集合への純粋な操作では可視性を再検査しないため、別の呼び出し元へ値を共有する際の管理はアプリケーションの責務です。オブジェクト型に付けた省略可能な `visibility` 述語が、読み取りとアクションの対象を絞ります。見えないオブジェクトは存在しないものと同じ扱いで、`get` は `undefined` を返し、走査結果にも現れず、アクションの対象なら `TARGET_NOT_FOUND` で拒否されます。
 
 認証は、actor の身元をランタイムの外で確立する責務です。認可を設ける場合は、オブジェクト型やアクションにポリシーを配置し、すべての消費者に同じ制約が働くようにします。その配置と、グループ・属性・ポリシー言語などの実現機構は別の設計判断です。事前条件は業務上の妥当性を検査します。権限と妥当性を分けて設計することは推奨しますが、別々の仕組みにすること自体はパターンの成立条件ではありません。
 
@@ -81,7 +156,7 @@ effects はデータとして変更を記述する純粋な関数です。`modif
 
 Function の実装は読み取りに呼び出し元の actor を使い、書き込みなどの副作用を起こしてはいけません。事前条件・effects と同じく、これはモデル作者が守る契約であり、サンドボックスによる強制ではありません。
 
-集合は普通の配列です。複数の Action の実行は独立した試行で、監査エントリも別々です。1つのアクションが配列パラメータを受け取り、ローカルの編集プラン全体を検査して原子的にコミットすることもできます。個別の preview がすべて成功しても、まとめたプランが成立するとは限りません。
+複数の Action の実行は独立した試行で、監査エントリも別々です。1つのアクションが配列パラメータを受け取り、ローカルの編集プラン全体を検査して原子的にコミットすることもできます。個別の preview がすべて成功しても、まとめたプランが成立するとは限りません。
 
 ## Authority の検査
 
@@ -160,6 +235,8 @@ Function の実装は読み取りに呼び出し元の actor を使い、書き�
 - 1つの編集プランで source-backed と ontology-owned の変更を混在させられません。生成できるのは ontology-owned な型だけです。[Authority の検査](#authority-の検査)で判定します。
 - 削除・リンク属性・複合主キーは未対応です。デモの注文明細の数量はデータ層に残しています。
 - `create`・`link`・`unlink` の編集内容は実行時に検査し、TypeScript の型はモデルから導きません。ネストしたプロパティの検証はその Zod スキーマに従い、ランタイムが strict にすることはありません。
-- クエリはローカルの SQLite スナップショットを使い、ページングや結果件数の上限はありません。Object set・pivot・フェデレーション・実行時のスキーマ進化は実装した API の範囲外です。監査ログはグラフ内のオブジェクトにはせず、独立した管理者ビューとして扱います。
+- クエリはローカルの SQLite スナップショットを使い、ページングや結果件数の上限はありません。保存クエリ・遅延評価・自動的な経路履歴・再帰探索・フェデレーション・実行時のスキーマ進化は実装した API の範囲外です。監査ログはグラフ内のオブジェクトにはせず、独立した管理者ビューとして扱います。
 
 v0.3 から API が変わっています。読み取り結果と `meta.target` は `{ type, pk, properties }` となり、走査は最初の引数にインスタンスを取ります。アクション定義は `defineAction(objects, definition)`、変更の記述は `modify(instance, changes)` を使います。保存済みの行と監査ログの edit データの形式は従来どおりです。公開済みの版は [release notes](https://github.com/gura105/operational-ontology/releases) にあります。
+
+集合 API への移行では、`search`・`traverse` の配列アクセスを `.objects` に置き換え、集合からの走査には `pivot`、等値条件の省略形には構造化条件を使います。集計は ObjectSet、属性名による `groupBy`、任意の数値属性 `sum` を受け取り、`{ set, columns, values }` を返します。リンクを使う集計や独自指標はモデルの Function に置きます。従来の配列を返す形式とコールバックによる集計形式は、オーバーロードとして残しません。

@@ -333,7 +333,7 @@ test('preview shares execution checks but never writes back, commits, or audits'
   const task = { orderId: 'O2', taskId: 'T-preview', title: 'Investigate' }
   assert.equal(rt.preview('openTask', task, asTest).ok, true)
   assert.equal(rt.get('Task', 'T-preview', asTest), undefined)
-  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'orderTasks', asTest), [])
+  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'orderTasks', asTest).objects, [])
   assert.equal(rt.auditLog().length, 1)
   assert.equal(rt.run('openTask', task, asTest).ok, true)
 })
@@ -350,7 +350,7 @@ test('preview returns the same local refusals, including edits and authority, wi
   assert.deepEqual(calls.map((call) => { const result = call(); return result.ok ? 'ok' : result.error.code }),
     ['SHIPPED_ORDER_CANNOT_BE_CANCELLED', 'TARGET_NOT_FOUND', 'INVALID_PARAMS', 'INVALID_EDITS', 'UNDECLARED_SOURCE_WRITE'])
   assert.deepEqual(rt.auditLog(), [])
-  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', asTest).map((o) => o.pk), ['C1'])
+  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', asTest).objects.map((o) => o.pk), ['C1'])
 
   const db = new Database(':memory:')
   const noAdapter = createRuntime(ontology, db)
@@ -560,7 +560,7 @@ test('the preflight is the single gate: store-level violations are refused befor
   assert.deepEqual(calls, []) // the plan never reached the system of record
   // The dry run left no trace: the unlink that "ran" before the failing
   // link is rolled back with everything else.
-  assert.deepEqual(rt.traverse(rt.get('Customer', 'C1', asTest)!, 'customerOrders', asTest).map((o) => o.pk), ['O1', 'O2'])
+  assert.deepEqual(rt.traverse(rt.get('Customer', 'C1', asTest)!, 'customerOrders', asTest).objects.map((o) => o.pk), ['O1', 'O2'])
   assert.equal(rt.auditLog({ status: 'applied' }).length, 0)
 })
 
@@ -576,7 +576,7 @@ test('one-to-many cardinality is enforced at the write gate, before write-back',
     assert.match(result.error.message, /one-to-many/)
   }
   assert.deepEqual(calls, [])
-  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).map((c) => c.pk), ['C1'])
+  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).objects.map((c) => c.pk), ['C1'])
   assert.equal(rt.auditLog({ status: 'applied' }).length, 0)
 })
 
@@ -746,7 +746,7 @@ test('ontology-owned objects and links survive a re-index untouched', () => {
   rt.run('openTask', { orderId: 'O2', taskId: 'T1', title: 'call the customer' }, { actor: 'test' })
   rt.load(SNAPSHOT) // full re-index of everything a source supplies
   assert.equal(rt.get('Task', 'T1', asTest)!.properties.title, 'call the customer')
-  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'orderTasks', asTest).map((t) => t.pk), ['T1'])
+  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'orderTasks', asTest).objects.map((t) => t.pk), ['T1'])
 })
 
 test('a model that stops owning a property refuses to load over its edits', () => {
@@ -792,7 +792,7 @@ test('an action can create an ontology-owned object and wire it, atomically', ()
   const result = rt.run('openTask', { orderId: 'O2', taskId: 'T1', title: 'triage the backlog' }, { actor: 'test' })
   assert.equal(result.ok, true)
   assert.equal(rt.get('Task', 'T1', asTest)!.properties.title, 'triage the backlog')
-  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'orderTasks', asTest).map((t) => t.pk), ['T1'])
+  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'orderTasks', asTest).objects.map((t) => t.pk), ['T1'])
   assert.equal(rt.auditLog({ status: 'applied' })[0]?.target, 'Order/O2')
   // A second creation with the same pk collides in the store.
   const dup = rt.run('openTask', { orderId: 'O2', taskId: 'T1', title: 'again' }, { actor: 'test' })
@@ -940,18 +940,18 @@ test('actions can rewire the graph itself — links are edits too', () => {
     { actor: 'test' },
   )
   assert.equal(result.ok, true)
-  assert.deepEqual(rt.traverse(rt.get('Customer', 'C1', asTest)!, 'customerOrders', asTest).map((o) => o.pk), ['O1'])
-  assert.deepEqual(rt.traverse(rt.get('Customer', 'C2', asTest)!, 'customerOrders', asTest).map((o) => o.pk), ['O2'])
+  assert.deepEqual(rt.traverse(rt.get('Customer', 'C1', asTest)!, 'customerOrders', asTest).objects.map((o) => o.pk), ['O1'])
+  assert.deepEqual(rt.traverse(rt.get('Customer', 'C2', asTest)!, 'customerOrders', asTest).objects.map((o) => o.pk), ['O2'])
 })
 
 test('links traverse in both directions', () => {
   const rt = setup()
   assert.deepEqual(
-    rt.traverse(rt.get('Customer', 'C1', asTest)!, 'customerOrders', asTest).map((o) => o.pk),
+    rt.traverse(rt.get('Customer', 'C1', asTest)!, 'customerOrders', asTest).objects.map((o) => o.pk),
     ['O1', 'O2'],
   )
   assert.deepEqual(
-    rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).map((c) => c.pk),
+    rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).objects.map((c) => c.pk),
     ['C1'],
   )
 })
@@ -984,7 +984,7 @@ test('prototype names are not operations, objects, or links', () => {
   // @ts-expect-error not an object type name
   assert.throws(() => rt.get('toString', 'x', asTest), /unknown object type/)
   // @ts-expect-error not a link type name
-  assert.throws(() => rt.traverse(rt.get('Customer', 'C1', asTest)!, 'toString', asTest), /unknown link type/)
+  assert.throws(() => rt.traverse(rt.get('Customer', 'C1', asTest)!, 'toString', asTest).objects, /unknown link type/)
   // …and not link types inside an edit plan either — refused before the
   // adapter could ever see the plan.
   const viaEffects = rt.run('protoUnlink', { orderId: 'O2' }, { actor: 'test' })
@@ -1020,7 +1020,7 @@ test('re-loading resets source-backed links instead of merging', () => {
   rt.load(SNAPSHOT)
   // The local echo of the reassignment is gone; the snapshot's view is back.
   assert.deepEqual(
-    rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).map((c) => c.pk),
+    rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).objects.map((c) => c.pk),
     ['C1'],
   )
 })
@@ -1051,7 +1051,7 @@ test('a partial re-load that breaks surviving edits is refused whole', () => {
   // Rolled back whole: C2 and the edited link both survive.
   assert.notEqual(rt.get('Customer', 'C2', asTest), undefined)
   assert.deepEqual(
-    rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).map((c) => c.pk),
+    rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).objects.map((c) => c.pk),
     ['C2'],
   )
 })
@@ -1073,23 +1073,22 @@ test('indexing refuses unknown keys instead of silently stripping them', () => {
 
 test('aggregation happens at query time', () => {
   const rt = setup()
-  const byStatus = rt.aggregate('Order', {
-    ...asTest,
-    groupBy: (o) => o.properties.status,
-    sum: (o) => o.properties.total,
-  })
-  assert.deepEqual(byStatus, { shipped: { count: 1, sum: 100 }, pending: { count: 1, sum: 200 } })
+  const orders = rt.search('Order', asTest)
+  const byStatus = rt.aggregate(orders, { groupBy: 'status', sum: 'total' })
+  assert.deepEqual(byStatus.values.map(({ key, count, sum }) => ({ key, count, sum })), [
+    { key: 'shipped', count: 1, sum: 100 }, { key: 'pending', count: 1, sum: 200 },
+  ])
+  assert.deepEqual(byStatus.set, orders)
 })
 
 test('aggregation is immune to prototype-named groups', () => {
   const rt = setup()
-  const groups = rt.aggregate('Order', {
-    ...asTest,
-    groupBy: (o) => (o.pk === 'O1' ? '__proto__' : 'toString'),
-  })
-  assert.equal(Object.getOwnPropertyDescriptor(groups, '__proto__')?.value?.count, 1)
-  assert.equal(Object.getOwnPropertyDescriptor(groups, 'toString')?.value?.count, 1)
-  assert.equal(({} as Record<string, unknown>).count, undefined) // Object.prototype untouched
+  const orders = rt.search('Order', asTest)
+  orders.objects[0].properties.id = '__proto__'
+  orders.objects[1].properties.id = 'toString'
+  const groups = rt.aggregate(orders, { groupBy: 'id' })
+  assert.deepEqual(groups.values.map(({ key, count }) => [key, count]), [['__proto__', 1], ['toString', 1]])
+  assert.equal(({} as Record<string, unknown>).count, undefined)
 })
 
 // ─── Declared · visibility: fail-open, attached to the model ───
@@ -1156,8 +1155,8 @@ function visSetup() {
 
 test('visibility lives in the model: the same search returns different worlds', () => {
   const rt = visSetup()
-  assert.deepEqual(rt.search('Doc', { actor: 'user:alice' }).map((d) => d.pk), ['D1'])
-  assert.deepEqual(rt.search('Doc', { actor: 'user:auditor' }).map((d) => d.pk), ['D1', 'D2'])
+  assert.deepEqual(rt.search('Doc', { actor: 'user:alice' }).objects.map((d) => d.pk), ['D1'])
+  assert.deepEqual(rt.search('Doc', { actor: 'user:auditor' }).objects.map((d) => d.pk), ['D1', 'D2'])
 })
 
 test('a crashing visibility predicate is audited as EXECUTION_CRASHED', () => {
@@ -1168,8 +1167,8 @@ test('a crashing visibility predicate is audited as EXECUTION_CRASHED', () => {
 
 test('a hidden origin leaks nothing through traversal', () => {
   const rt = visSetup()
-  assert.deepEqual(rt.traverse(rt.get('Doc', 'D2', { actor: 'user:auditor' })!, 'docComments', { actor: 'user:alice' }), [])
-  assert.equal(rt.traverse(rt.get('Doc', 'D2', { actor: 'user:auditor' })!, 'docComments', { actor: 'user:bob' }).length, 1)
+  assert.deepEqual(rt.traverse(rt.get('Doc', 'D2', { actor: 'user:auditor' })!, 'docComments', { actor: 'user:alice' }).objects, [])
+  assert.equal(rt.traverse(rt.get('Doc', 'D2', { actor: 'user:auditor' })!, 'docComments', { actor: 'user:bob' }).objects.length, 1)
 })
 
 test('a hidden object is indistinguishable from a nonexistent one — even as an action target', () => {

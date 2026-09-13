@@ -6,20 +6,32 @@ The [README](./README.md) introduces the pattern, demo, and scope. This document
 
 An action execution refusal returns `{ ok: false, error: { code, message } }` and is audited. Preview uses the same result shape without auditing. Programming and storage errors may throw; the write path records them as described below. Query errors are exceptions rather than action refusals.
 
+## Code organization
+
+The public entry point remains `Runtime`; the implementation follows the responsibilities below without introducing a query class or storage interface hierarchy.
+
+| File | Responsibility |
+| --- | --- |
+| `model.ts` | Definitions, instance values and types derived from the model. |
+| `core.ts` | Actor-scoped reads, the public query methods, `run` / `preview`, and the Action gate. |
+| `query.ts` | Pure operations on evaluated sets and aggregations; structured conditions shared with MCP. |
+| `store.ts` | Concrete SQLite storage, indexing, integrity checks, edits and atomic local audit commits. |
+| `mcp.ts` | Generate tools from the model and adapt inputs to the same runtime operations. |
+
 ## Instances and traversal
 
-`model.ts` contains definitions and model-derived types; `core.ts` interprets them. Runtime object values are read snapshots shaped as `{ type, pk, properties }`. Identity is `(type, pk)`; `pk` comes from the declared primary key, even when that property is not named `id`. Business properties named `type`, `pk`, or `properties` remain nested without collisions. Mutating a snapshot does not write the store.
+Runtime object values are read snapshots shaped as `{ type, pk, properties }`. Identity is `(type, pk)`; `pk` comes from the declared primary key, even when that property is not named `id`. Business properties named `type`, `pk`, or `properties` remain nested without collisions. Mutating a snapshot does not write the store.
 
-`get`, `search`, and `traverse` return instances. Visibility, predicate filters, aggregation callbacks, action contexts, and `meta.target` receive instances too. Equality filters, `modify` changes, `create` data, and indexing rows still use business properties directly. `defineAction(objects, …)` derives `ctx.object` from its `object` name and `ctx.params` from the parameter schema. `modify(instance, changes)` produces the existing edit data; it performs no write itself. `create`, `link`, and `unlink` retain their runtime-checked payloads.
+`get` returns an instance or `undefined`; `search`, `traverse` and `pivot` return an `ObjectSet`. Visibility, object-filter callbacks, action contexts and `meta.target` receive instances. `modify` changes, `create` data and indexing rows use business properties directly. `defineAction(objects, …)` derives `ctx.object` from its object name and `ctx.params` from its parameter schema. `modify(instance, changes)` describes an edit without applying it. `create`, `link` and `unlink` retain their runtime-checked payloads.
 
 With the orders example, either end of a link can be the source:
 
 ```ts
 const hq = { actor: 'user:hq' }
 const customer = rt.get('Customer', 'N-C01', hq)!
-const orders = rt.traverse(customer, 'customerOrders', hq) // Order instances
-const customers = rt.traverse(orders[0], 'customerOrders', hq) // Customer instances
-console.log(orders[0].properties.status)
+const orders = rt.traverse(customer, 'customerOrders', hq) // ObjectSet<Order>
+const customers = rt.traverse(orders.objects[0], 'customerOrders', hq) // ObjectSet<Customer>
+console.log(orders.objects[0].properties.status)
 ```
 
 TypeScript derives object and action names, instance properties, action params, and `modify` changes from the model. Keep the inferred definition type: an explicit `OntologyDef` annotation erases its specific names and schemas. Runtime validation still applies.
@@ -37,13 +49,76 @@ In the editor, entering the source instance narrows link-name completions to lin
 
 For an `Employee → Employee` link defined from manager to subordinate, `forward` gets subordinates and `reverse` gets managers. Only the existing link name is needed; there are no directional aliases.
 
-The rule depends on the declared types, not the stored edges. Results are always arrays, including for one-to-many reverse traversal. Return types depend on source and link; optional direction does not widen them. Narrow a union of source types using `type` before traversing when its ends differ. The instance is a snapshot, so traversal re-reads `(type, pk)` with the caller's actor, checks visibility at both ends, and returns an empty array for a missing or hidden source. It ignores the supplied properties for these checks. Invalid source shape, link, or direction throws.
+The rule depends on the declared types, not the stored edges. Traversal always returns a set, including for one-to-many reverse traversal. Return types depend on source and link; optional direction does not widen them. Narrow a union of source types using `type` before traversing when its ends differ. Traversal re-reads `(type, pk)` under the caller's actor and checks visibility at both ends. Supplied properties are ignored for these checks. Missing or hidden sources yield an empty set retaining the destination type. Invalid source shape, link or direction throws.
+
+`pivot(set, linkName, { actor, direction? })` applies the same rules to each origin and deduplicates the destinations. It validates the link and direction even when the input set is empty. Returning to a previously visited type retrieves the related instances, not the original or complete set of that type.
 
 MCP reads serialize the same shape. Traversal tools take `{ source: { type, pk, properties }, direction? }`, with direction required in the schema for same-type links. The generated schemas and runtime validate dynamic inputs; the MCP adapter contains the type assertion for this boundary. Typed application calls have no permissive overload for arbitrary strings. Stored rows and audit edit payloads keep their existing format.
 
+## Object sets, filters and aggregation
+
+An `ObjectSet<O>` is `{ type, objects }`: one object type and an array of its instances, already evaluated. Empty sets retain the type. Identity is `(type, pk)`; duplicates keep the first occurrence. `objectSet(type, objects)` constructs and validates this shape. Its tag and array are readonly in TypeScript, and a union of set types keeps each tag paired with its element type. Runtime checks also reject mismatched tags. This is not a deep freeze: object properties remain read snapshots, and set operations may share those instance values.
+
+`filter`, `union`, `intersect`, `subtract` and `aggregate` operate on those snapshots without an actor or store read. They return new containers, do not change the store and are not audited. Set algebra requires the same object type. Union preserves left members followed by unseen right members; intersection and subtraction preserve left order and values. No freshness comparison is attempted: when identities overlap, the left snapshot wins. Re-run the read or Function to obtain current state.
+
+```ts
+const orders = rt.search('Order', { actor: 'user:hq' })
+const pending = rt.filter(orders, [{ property: 'status', op: 'eq', value: 'pending' }])
+const large = rt.filter(orders, (order) => order.properties.total >= 10000)
+const either = rt.union(pending, large)       // OR
+const both = rt.intersect(pending, large)   // AND between sets
+const remaining = rt.subtract(orders, both)
+```
+
+Structured conditions are an ANDed array of `{ property, op, value }`. Field names, operators and values are inferred from the model and validated at runtime, including against an empty set. `search` also accepts them in its optional `filter` option. The legacy `{ status: 'pending' }` equality shorthand is removed. Callbacks are synchronous TypeScript predicates; they must not cause side effects and cannot be sent over MCP.
+
+| Field | Operators |
+| --- | --- |
+| String / string enum | `eq`, `ne`, `in`, `contains`; case-sensitive. |
+| Number | `eq`, `ne`, `in`, `gt`, `gte`, `lt`, `lte`. |
+| Boolean | `eq`, `ne`, `in`. |
+| ISO date / datetime | `eq`, `ne`, `in`, `gt`, `gte`, `lt`, `lte`. |
+
+Declare dates with `z.iso.date()` or `z.iso.datetime({ offset: true })` so the editor distinguishes dates from ordinary strings. Datetimes are compared as instants, including offsets; dates are calendar dates interpreted at UTC midnight for comparison. They remain JSON strings in storage. Numeric values are not coerced from strings. Optional/nullable/default wrappers around supported scalar schemas are recognized, but comparing a null/missing value, grouping by one, or summing one is outside the query contract and throws; no implicit zero is used. Nested properties, array predicates and mixed-type schemas are not part of the structured condition language. OR uses union; NOT uses subtraction from an explicit base set.
+
+`aggregate(set, { groupBy, sum? })` groups by one scalar property, always computes `count`, and optionally sums one numeric property. Its result has three parts:
+
+- `set`: the input objects belonging to its groups.
+- `columns`: numeric metric names and their runtime types, such as `{ count: 'number', sum: 'number' }`.
+- `values`: rows containing a scalar `key`, member `pks`, and the declared numeric metrics.
+
+```ts
+const grouped = rt.aggregate(pending, { groupBy: 'status', sum: 'total' })
+const selected = rt.filter(grouped, [{ property: 'sum', op: 'gte', value: 10000 }])
+console.log(selected.values) // Selected rows, with their original metrics
+const targets = selected.set // Order objects belonging to those rows
+```
+
+There is no separate `having` method. Filtering an aggregation selects rows by numeric metrics and retains the union of their corresponding objects; it does not recompute metrics. To filter object properties, use `.set`, then aggregate again explicitly if needed. Filtering to zero rows keeps an empty typed set and the column declarations. Grouping by a property does not pivot to the type that property might refer to.
+
+Model Functions can return the same `AggregationResult<O, Columns>` shape for domain summaries. For example, finance returns recipient **accounts** with `senderCount`, `transactionCount` and `totalAmount`, computed from **transfers**. `aggregationResult(set, columns, values)` validates finite numeric metrics, unique group keys and member references, and forms the corresponding set. It also preserves column names for TypeScript completion and MCP validation. Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Automatic path history, recursive traversal, arbitrary transforms, joins and a general aggregation language are not implemented.
+
+## MCP query inputs
+
+The model generates `search_<type>`, `get_<type>`, `filter_<type>`, `union_<type>`, `intersect_<type>`, `subtract_<type>`, `aggregate_<type>`, plus `traverse_<link>` and `pivot_<link>`.
+
+| Tool | Input |
+| --- | --- |
+| `search_<type>` | `{ where?: conditions }` |
+| `get_<type>` | `{ <primaryKey>: value }` |
+| `filter_<type>` | `{ source: { pks: [...] }, where: conditions }`, or a returned aggregation as `source`. |
+| `union/intersect/subtract_<type>` | `{ left: pks, right: pks }` |
+| `aggregate_<type>` | `{ pks, group_by, sum?, where? }` |
+| `traverse_<link>` | `{ source: { type, pk, properties }, direction? }` |
+| `pivot_<link>` | `{ source: { type, pks }, direction? }` |
+
+Object collections serialize as `{ type, objects }`. Inputs identified by primary key are reloaded under the session actor; supplied snapshots never grant visibility. Conditions use the same definitions and evaluator as TypeScript. No arbitrary code or SQL is accepted.
+
+For an aggregation input, `filter_<type>` validates the declared numeric columns and member correspondence, reloads target objects, and drops a whole group if any target member is missing or hidden. Supplied metrics remain caller-supplied analysis snapshots: the server neither recomputes them nor certifies their provenance or freshness. Actions must check their own current inputs and evidence, as the examples do. An aggregation's `.set` is the object input for the next exploration step; an outer Function result with extra evidence is not itself an aggregation.
+
 ## Visibility and caller identity
 
-Every `get`, `search`, `traverse`, and `aggregate` call carries an `actor`. An object type's optional `visibility` predicate filters reads and action targets. A hidden object behaves like a missing one: `get` returns `undefined`, traversal returns no hidden rows, and running an action refuses a hidden target with `TARGET_NOT_FOUND`.
+`get`, `search`, `traverse` and `pivot` carry an `actor`. Pure operations on already obtained sets do not reapply visibility; sharing such values with another caller is the application’s responsibility. An object type's optional `visibility` predicate filters reads and action targets. A hidden object behaves like a missing one: `get` returns `undefined`, traversal returns no hidden rows, and running an action refuses a hidden target with `TARGET_NOT_FOUND`.
 
 Authentication establishes the actor's identity outside the runtime. When an implementation provides authorization, policies belong on object types and actions so every consumer is subject to the same constraints. That placement is a separate design choice from the mechanism used to implement it, such as groups, attributes, or a policy language. Preconditions check business validity. Separating permission from validity is recommended; implementing them as separate mechanisms is not a condition of the pattern.
 
@@ -81,7 +156,7 @@ Models may register named reads in `functions` using `defineFunction({ descripti
 
 Function implementations must use the caller's actor for their reads and must not perform writes or other side effects. This is a model-author contract, like pure preconditions and effects, not an enforced sandbox.
 
-Collections remain ordinary arrays. Running several Actions creates independent attempts with separate audit entries. A single action can accept an array parameter and validate and commit its whole local edit plan atomically. Separate successful previews do not establish that the combined plan fits.
+Running several Actions creates independent attempts with separate audit entries. A single action can accept an array parameter and validate and commit its whole local edit plan atomically. Separate successful previews do not establish that the combined plan fits.
 
 ## The authority line, checked
 
@@ -160,6 +235,8 @@ These limits describe the current implementation:
 - An edit plan cannot mix source-backed and ontology-owned changes; creation is limited to ontology-owned types, as shown in the [authority checks](#the-authority-line-checked).
 - There are no deletes, link properties, or composite keys. The demo leaves order-line quantities in the data layer.
 - `create`, `link`, and `unlink` payloads are checked at runtime; their TypeScript types are not derived from the model. Nested properties follow their Zod schemas and are not made strict by the runtime.
-- Queries use the local SQLite snapshot, with no pagination or result cap. Object sets, pivot, federation, and runtime schema evolution are outside the implemented API. The audit log is a separate administrative view rather than an object in the graph.
+- Queries use the local SQLite snapshot, with no pagination or result cap. Saved/lazy queries, automatic path history, recursive exploration, federation and runtime schema evolution are outside the implemented API. The audit log is a separate administrative view rather than an object in the graph.
 
 The API has changed since v0.3: object reads and `meta.target` use `{ type, pk, properties }`; traversal takes an instance first; actions use `defineAction(objects, definition)`; modifications use `modify(instance, changes)`. Stored rows and audit edit payloads retain their earlier format. Published versions are in the [release notes](https://github.com/gura105/operational-ontology/releases).
+
+For the set API migration: replace array access on `search` / `traverse` with `.objects`, use `pivot` for sets, and replace equality shorthand with structured conditions. Aggregation now takes an ObjectSet and a property-based `groupBy`, with optional numeric `sum`, and returns `{ set, columns, values }`; link-based or custom metrics belong in model Functions. The older array-return and callback-aggregation forms are not retained as overloads.

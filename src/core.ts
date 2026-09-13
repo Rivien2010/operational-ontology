@@ -19,19 +19,27 @@
  * Vocabulary: model.ts defines the schema side of the model; the
  * store holds the instance side — object state, link instances, and the
  * audit log, where one entry is one attempted action.
+ *
+ * Runtime coordinates actor-scoped reads and the Action gate. Store owns
+ * SQLite integrity and transactions; query.ts operates on evaluated values.
+ * The public methods keep those details behind one model-derived API.
  */
-import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { Database } from 'better-sqlite3'
 
 import { defineOntology, isPlainJson, reject } from './model.js'
+import { Store } from './store.js'
+import * as query from './query.js'
+import type { ObjectSet, AggregationResult, ObjectFilter, GroupProperty, SumProperty, MetricWhere } from './query.js'
 import type {
-  ActionCtx, ActionDef, ActionName, ActionResult, Edit, ObjectFilter, ObjectInstance, ObjectName,
-  ObjectOf, ObjectTypeDef, OntologyDef, ParamsOf, Properties, LinkName, LinksFrom, LinkTarget,
+  ActionCtx, ActionDef, ActionName, ActionResult, AuditEntry, Edit, ObjectInstance, ObjectName,
+  ObjectOf, OntologyDef, ParamsOf, LinkName, LinksFrom, LinkTarget,
   TraverseOptions, Violation,
   OperationName, OperationParamsOf, OperationResultOf,
 } from './model.js'
 export * from './model.js'
+export { objectSet, aggregationResult } from './query.js'
+export type { ObjectSet, AggregationResult, ObjectFilter, Where, MetricWhere } from './query.js'
 
 // ───────────────────────────── Write-back ─────────────────────────────
 
@@ -58,38 +66,12 @@ export interface WritebackAdapter {
 
 // ───────────────────────────── Runtime ─────────────────────────────
 
-/** Internal: the sentinel that rolls a preflight transaction back. */
-class Rollback extends Error {}
-
 const editErrorMessage = (e: unknown): string =>
   e instanceof z.ZodError
     ? `${e.issues[0]?.path.join('.') || 'edit'}: ${e.issues[0]?.message ?? 'invalid'}`
     : e instanceof Error
       ? e.message
       : String(e)
-
-/**
- * One attempted action, applied or rejected — the instance to an ActionDef's
- * type. Its identity is the occurrence, not the arguments: the same params
- * submitted twice are two entries. That is why the log only appends.
- */
-export interface AuditEntry {
-  seq: number
-  ts: string
-  actor: string
-  action: string
-  target: string
-  params: Record<string, unknown>
-  status: 'applied' | 'rejected'
-  error: Violation | null
-  edits: Edit[] | null
-}
-
-export interface AggregateOptions<O extends ObjectInstance> {
-  filter?: ObjectFilter<O>
-  groupBy: (o: O) => string
-  sum?: (o: O) => number
-}
 
 /**
  * The four answers this implementation declares, as one enumerable value —
@@ -106,53 +88,22 @@ export const declarations = {
 } as const
 
 /**
- * The ontology's own store — object state, user edits, and the audit log —
- * separate from the source systems it was indexed from. A read-only layer
- * could stay virtual; a layer that accepts writes has to own state
- * (edits exist here before, or instead of, the systems of record).
+ * Interpret one specific model. Carrying Model through the class preserves
+ * names and schemas for every method's hints and result types. The private
+ * Store holds ontology state separately from the indexed source systems.
  */
 export class Runtime<Model extends OntologyDef = OntologyDef> {
   readonly ontology: Model
   readonly declarations = declarations
-  readonly #db: Database
+  readonly #store: Store<Model>
   readonly #writeback?: WritebackAdapter
-  readonly #schemas = new Map<string, z.ZodObject<Properties>>()
 
   constructor(ontology: Model, db: Database, opts: { writeback?: WritebackAdapter } = {}) {
+    // A caller may pass a plain definition without using defineOntology first.
     this.ontology = defineOntology(ontology)
-    this.#db = db
+    this.#store = new Store(this.ontology, db)
     this.#writeback = opts.writeback
-    for (const [name, obj] of Object.entries(ontology.objects)) {
-      this.#schemas.set(name, z.object(obj.properties))
-    }
-    this.#db.exec(`
-      CREATE TABLE IF NOT EXISTS objects (
-        type TEXT NOT NULL, pk TEXT NOT NULL, data TEXT NOT NULL,
-        PRIMARY KEY (type, pk)
-      );
-      CREATE TABLE IF NOT EXISTS links (
-        name TEXT NOT NULL, from_pk TEXT NOT NULL, to_pk TEXT NOT NULL,
-        PRIMARY KEY (name, from_pk, to_pk)
-      );
-      -- The edit layer for ontology-owned properties on source-backed rows:
-      -- the current effective patch per object, reapplied over a re-indexed
-      -- base. Ontology-owned types and links need no overlay — load() cannot
-      -- touch them, so they survive in place.
-      CREATE TABLE IF NOT EXISTS overlay (
-        type TEXT NOT NULL, pk TEXT NOT NULL, patch TEXT NOT NULL,
-        PRIMARY KEY (type, pk)
-      );
-      CREATE TABLE IF NOT EXISTS audit_log (
-        seq INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
-        target TEXT NOT NULL, params TEXT NOT NULL,
-        status TEXT NOT NULL CHECK (status IN ('applied', 'rejected')),
-        error TEXT, edits TEXT
-      );
-    `)
   }
-
-  // ── Indexing (the data-layer hand-off) ──
 
   /**
    * Load a snapshot of integrated physical data into the ontology store —
@@ -167,169 +118,131 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     objects?: { [K in ObjectName<Model>]?: Record<string, unknown>[] }
     links?: { [Link in LinkName<Model>]?: Array<[from: string, to: string]> }
   }): void {
-    this.#refuseOpenTransaction('load')
-    const insertObject = this.#db.prepare('INSERT INTO objects (type, pk, data) VALUES (?, ?, ?)')
-    const insertLink = this.#db.prepare('INSERT OR REPLACE INTO links (name, from_pk, to_pk) VALUES (?, ?, ?)')
-    this.#db.transaction(() => {
-      const objectEntries = Object.entries(snapshot.objects ?? {}) as Array<[string, Record<string, unknown>[]]>
-      for (const [type, rows] of objectEntries) {
-        const def = this.ontology.objects[type]
-        const schema = this.#schemas.get(type)
-        if (!def || !schema) throw new Error(`unknown object type "${type}"`)
-        if (def.owned === true) {
-          throw new Error(`cannot load "${type}": the type is ontology-owned — no source supplies its rows`)
-        }
-        const defaults = def.owned ?? {}
-        this.#db.prepare('DELETE FROM objects WHERE type = ?').run(type)
-        for (const row of rows) {
-          // The same strictness as edits, for the same reason: a silently
-          // stripped key is an integration bug travelling without a trace.
-          const unknown = Object.keys(row).filter((key) => !Object.hasOwn(def.properties, key))
-          if (unknown.length > 0) {
-            throw new Error(
-              `invalid ${type} row: unknown propert${unknown.length > 1 ? 'ies' : 'y'} "${unknown.join('", "')}"`,
-            )
-          }
-          for (const key of Object.keys(defaults)) {
-            if (Object.hasOwn(row, key)) {
-              throw new Error(`invalid ${type} row: property "${key}" is ontology-owned — a source cannot supply it`)
-            }
-          }
-          const parsed = schema.safeParse({ ...row, ...defaults })
-          if (!parsed.success) {
-            throw new Error(`invalid ${type} row: ${parsed.error.issues[0]?.message ?? 'schema mismatch'}`)
-          }
-          insertObject.run(type, String(parsed.data[def.primaryKey]), this.#storable(type, parsed.data))
-        }
-        this.#reapplyOverlay(type)
-      }
-      const linkEntries = Object.entries(snapshot.links ?? {}) as Array<[string, Array<[string, string]>]>
-      for (const [name, pairs] of linkEntries) {
-        const link = Object.hasOwn(this.ontology.links, name) ? this.ontology.links[name] : undefined
-        if (!link) throw new Error(`unknown link type "${name}"`)
-        if (link.owned) {
-          throw new Error(`cannot load link "${name}": the link type is ontology-owned — no source supplies its instances`)
-        }
-        this.#db.prepare('DELETE FROM links WHERE name = ?').run(name)
-        for (const [from, to] of pairs) insertLink.run(name, from, to)
-      }
-      this.#validateLinks()
-    })()
+    this.#store.load(snapshot)
   }
 
-  /**
-   * Reapply the edit layer over a freshly indexed base. Refusals here roll
-   * back the whole load: an orphaned patch means the source dropped a row
-   * the ontology still holds owned state for — a reconciliation decision the
-   * runtime must not make silently. A patch carrying a key the model no
-   * longer declares ontology-owned is the schema-evolution twin of the same
-   * problem, refused for the same reason.
-   */
-  #reapplyOverlay(type: string): void {
-    const def = this.ontology.objects[type]!
-    const schema = this.#schemas.get(type)!
-    const ownedKeys = def.owned && def.owned !== true ? Object.keys(def.owned) : []
-    const rows = this.#db.prepare('SELECT pk, patch FROM overlay WHERE type = ?').all(type) as Array<{
-      pk: string
-      patch: string
-    }>
-    for (const { pk, patch } of rows) {
-      const changes = JSON.parse(patch) as Record<string, unknown>
-      const stale = Object.keys(changes).filter((key) => !ownedKeys.includes(key))
-      if (stale.length > 0) {
-        throw new Error(
-          `overlay for ${type}/${pk} carries "${stale.join('", "')}" which the model no longer declares ontology-owned`,
-        )
-      }
-      const base = this.#fetch(type, pk)
-      if (!base) {
-        throw new Error(
-          `re-index conflict: ${type}/${pk} carries ontology-owned edits (${Object.keys(changes).join(', ')}) ` +
-            'but the re-indexed base no longer has the row — clear the edit or restore the row, then re-load',
-        )
-      }
-      const merged = schema.parse({ ...base, ...changes })
-      this.#db
-        .prepare('UPDATE objects SET data = ? WHERE type = ? AND pk = ?')
-        .run(this.#storable(type, merged), type, pk)
-    }
-  }
-
-  // ── Read side: query the model, not the tables — and always as someone ──
-
+  /** The selected type determines properties; hidden and missing IDs both yield undefined. */
   get<K extends ObjectName<Model>>(type: K, pk: string, opts: { actor: string }): ObjectOf<Model, K> | undefined {
     return this.#read<ObjectOf<Model, K>>(type, pk, opts.actor)
   }
 
+  /** Read visible objects, then filter. NoInfer keeps conditions tied to the selected type. */
   search<K extends ObjectName<Model>>(
-    type: K,
-    opts: { actor: string; filter?: ObjectFilter<ObjectOf<Model, K>> },
-  ): ObjectOf<Model, K>[] {
-    return this.#scan<ObjectOf<Model, K>>(type, opts.actor, opts.filter)
+    type: K, opts: { actor: string; filter?: ObjectFilter<ObjectOf<Model, K>, Model['objects'][NoInfer<K>]['properties']> },
+  ): ObjectSet<ObjectOf<Model, K>> {
+    const set = query.objectSet(type, this.#scan(type, opts.actor) as ObjectOf<Model, K>[]) as ObjectSet<ObjectOf<Model, K>>
+    return opts.filter === undefined ? set : query.filterObjects(set, opts.filter, this.ontology.objects[type].properties)
   }
 
-  /** Follow a link from an instance. A self-type link needs an explicit direction. */
-  // Infer the source, then the link; check options against those choices.
-  // NoInfer stops a Customer from becoming Customer | Employee to accept 'manages',
-  // or Customer | Order to accept 'reverse' on customerOrders.
+  /**
+   * Infer the source, then the link; options cannot widen either choice.
+   * LinksFrom supplies related names, TraverseOptions determines direction,
+   * and LinkTarget carries the destination's property type into the result.
+   */
   traverse<Source extends ObjectName<Model>, Link extends LinksFrom<Model, NoInfer<Source>>>(
-    source: ObjectOf<Model, Source>,
-    linkName: Link,
+    source: ObjectOf<Model, Source>, linkName: Link,
     opts: TraverseOptions<Model, NoInfer<Source>, NoInfer<Link>>,
-  ): ObjectOf<Model, LinkTarget<Model, Source, Link>>[] {
-    if (
-      !source || typeof source.type !== 'string' || typeof source.pk !== 'string' ||
-      !source.properties || typeof source.properties !== 'object' || Array.isArray(source.properties)
-    ) {
+  ): ObjectSet<ObjectOf<Model, LinkTarget<Model, Source, Link>>> {
+    if (!source || typeof source.type !== 'string' || typeof source.pk !== 'string' ||
+        !source.properties || typeof source.properties !== 'object' || Array.isArray(source.properties)) {
       throw new Error('traverse() requires an object instance with type, pk, and properties')
     }
+    return this.#follow(source.type, [source.pk], linkName, opts) as ObjectSet<ObjectOf<Model, LinkTarget<Model, Source, Link>>>
+  }
+
+  /** Follow one relationship from a whole set; its tag works even when the set is empty. */
+  pivot<Source extends ObjectName<Model>, Link extends LinksFrom<Model, NoInfer<Source>>>(
+    source: ObjectSet<ObjectOf<Model, Source>>, linkName: Link,
+    opts: TraverseOptions<Model, NoInfer<Source>, NoInfer<Link>>,
+  ): ObjectSet<ObjectOf<Model, LinkTarget<Model, Source, Link>>> {
+    const set = query.objectSet(source.type, source.objects)
+    return this.#follow(set.type, set.objects.map((o) => o.pk), linkName, opts) as ObjectSet<ObjectOf<Model, LinkTarget<Model, Source, Link>>>
+  }
+
+  /**
+   * Overloads select the condition vocabulary: object properties for a set,
+   * numeric metric columns for an aggregation. Neither refreshes stored data.
+   * NoInfer prevents a condition from expanding the input's allowed fields.
+   */
+  filter<Source extends ObjectName<Model>>(
+    input: ObjectSet<ObjectOf<Model, Source>>,
+    where: ObjectFilter<ObjectOf<Model, NoInfer<Source>>, Model['objects'][NoInfer<Source>]['properties']>,
+  ): ObjectSet<ObjectOf<Model, Source>>
+  filter<O extends ObjectInstance, C extends string>(
+    input: AggregationResult<O, C>, where: MetricWhere<NoInfer<C>> | ((row: Readonly<Record<C, number>>) => boolean),
+  ): AggregationResult<O, C>
+  filter(input: ObjectSet | AggregationResult, where: unknown): ObjectSet | AggregationResult {
+    if ('set' in input) return query.filterAggregation(input, where as MetricWhere<never>)
+    const def = Object.hasOwn(this.ontology.objects, input.type) ? this.ontology.objects[input.type] : undefined
+    if (!def) throw new Error(`unknown object type "${input.type}"`)
+    return query.filterObjects(input, where, def.properties)
+  }
+
+  // For all three operations, infer the type from a and check b against it.
+  // Without NoInfer, an unrelated b could widen Source to a union of both types.
+  union<Source extends ObjectName<Model>>(a: ObjectSet<ObjectOf<Model, Source>>, b: NoInfer<ObjectSet<ObjectOf<Model, Source>>>): ObjectSet<ObjectOf<Model, Source>> {
+    return query.combine('union', a, b)
+  }
+
+  intersect<Source extends ObjectName<Model>>(a: ObjectSet<ObjectOf<Model, Source>>, b: NoInfer<ObjectSet<ObjectOf<Model, Source>>>): ObjectSet<ObjectOf<Model, Source>> {
+    return query.combine('intersect', a, b)
+  }
+
+  subtract<Source extends ObjectName<Model>>(a: ObjectSet<ObjectOf<Model, Source>>, b: NoInfer<ObjectSet<ObjectOf<Model, Source>>>): ObjectSet<ObjectOf<Model, Source>> {
+    return query.combine('subtract', a, b)
+  }
+
+  /**
+   * Every result has count; requesting sum adds that column to the result type.
+   * sum?: never keeps an invalid sum request from matching the count-only overload.
+   * The result retains source objects as members, alongside the grouped metrics.
+   */
+  aggregate<Source extends ObjectName<Model>>(
+    set: ObjectSet<ObjectOf<Model, Source>>,
+    options: { groupBy: GroupProperty<Model['objects'][NoInfer<Source>]['properties']>; sum: SumProperty<Model['objects'][NoInfer<Source>]['properties']> },
+  ): AggregationResult<ObjectOf<Model, Source>, 'count' | 'sum'>
+  aggregate<Source extends ObjectName<Model>>(
+    set: ObjectSet<ObjectOf<Model, Source>>,
+    options: { groupBy: GroupProperty<Model['objects'][NoInfer<Source>]['properties']>; sum?: never },
+  ): AggregationResult<ObjectOf<Model, Source>, 'count'>
+  aggregate(set: ObjectSet, options: { groupBy: string; sum?: string }): AggregationResult {
+    const def = Object.hasOwn(this.ontology.objects, set.type) ? this.ontology.objects[set.type] : undefined
+    if (!def) throw new Error(`unknown object type "${set.type}"`)
+    return query.aggregate(set, options, def.properties)
+  }
+
+  /** Traversal always re-reads both ends as this actor; snapshots are not authority. */
+  #follow(type: string, pks: readonly string[], linkName: string, opts: { actor: string; direction?: 'forward' | 'reverse' }): ObjectSet {
+    // Check the schema before iterating: an empty set must not hide a bad link
+    // or an ambiguous direction. These are also checks for untyped JS callers.
     const link = Object.hasOwn(this.ontology.links, linkName) ? this.ontology.links[linkName] : undefined
     if (!link) throw new Error(`unknown link type "${linkName}"`)
-    const forward = source.type === link.from
-    const reverse = source.type === link.to
-    if (!forward && !reverse) throw new Error(`link "${linkName}" does not connect "${source.type}"`)
-    if (forward && reverse && opts.direction === undefined) {
-      throw new Error(`link "${linkName}" requires a direction from "${source.type}"`)
-    }
+    const forward = type === link.from
+    const reverse = type === link.to
+    if (!forward && !reverse) throw new Error(`link "${linkName}" does not connect "${type}"`)
+    if (forward && reverse && opts.direction === undefined) throw new Error(`link "${linkName}" requires a direction from "${type}"`)
     const direction = opts.direction === undefined ? (forward ? 'forward' : 'reverse') : opts.direction
     if (!((direction === 'forward' && forward) || (direction === 'reverse' && reverse))) {
-      throw new Error(`invalid direction "${direction}" for link "${linkName}" from "${source.type}"`)
+      throw new Error(`invalid direction "${direction}" for link "${linkName}" from "${type}"`)
     }
-    const [where, select, targetType] = direction === 'forward'
-      ? ['from_pk', 'to_pk', link.to]
-      : ['to_pk', 'from_pk', link.from]
-    // The input is a snapshot, not authority. Re-read the origin under this actor.
-    if (!this.#read(source.type, source.pk, opts.actor)) return []
-    const rows = this.#db
-      .prepare(`SELECT ${select} AS pk FROM links WHERE name = ? AND ${where} = ? ORDER BY pk`)
-      .all(linkName, source.pk) as { pk: string }[]
-    return rows
-      .map((r) => this.#read<ObjectOf<Model, LinkTarget<Model, Source, Link>>>(targetType, r.pk, opts.actor))
-      .filter((o) => o !== undefined)
-  }
-
-  /** Query-time aggregation over the indexed objects. Nothing is precomputed. */
-  aggregate<K extends ObjectName<Model>>(
-    type: K,
-    opts: { actor: string } & AggregateOptions<ObjectOf<Model, K>>,
-  ): Record<string, { count: number; sum?: number }> {
-    // Accumulate in a Map: group keys are data, and data named "__proto__"
-    // must not walk — let alone pollute — the prototype chain.
-    const out = new Map<string, { count: number; sum?: number }>()
-    for (const obj of this.#scan<ObjectOf<Model, K>>(type, opts.actor, opts.filter)) {
-      const key = opts.groupBy(obj)
-      let bucket = out.get(key)
-      if (!bucket) {
-        bucket = { count: 0, ...(opts.sum ? { sum: 0 } : {}) }
-        out.set(key, bucket)
+    const target = direction === 'forward' ? link.to : link.from
+    const objects: ObjectInstance[] = []
+    for (const pk of pks) {
+      if (!this.#read(type, pk, opts.actor)) continue
+      for (const row of this.#store.related(linkName, direction, pk)) {
+        const object = this.#read(target, row.pk, opts.actor)
+        if (object) objects.push(object)
       }
-      bucket.count += 1
-      if (opts.sum) bucket.sum = (bucket.sum ?? 0) + opts.sum(obj)
     }
-    return Object.fromEntries(out)
+    // Several sources can reach the same target; a pivot returns objects, not paths.
+    return query.objectSet(target, objects)
   }
 
-  /** One entry point for named operations; only actions pass through the write gate. */
+  /**
+   * One entry point for named operations; only actions pass through the write gate.
+   * The selected name determines params and result. A Function's result passes
+   * through as defined, including a Promise; Action execution is synchronous.
+   */
   run<Name extends OperationName<Model>>(
     name: Name, params: NoInfer<OperationParamsOf<Model, Name>>, opts: { actor: string },
   ): OperationResultOf<Model, Name> {
@@ -347,8 +260,6 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return this.#runAction(actionName, params, opts, 'preview')
   }
 
-  // ── Write gate: both run() and preview() check the same rules ──
-
   /**
    * Execute an action. This is the only way the API changes state:
    * validate params → load target → preconditions → effects → dry-run the
@@ -360,7 +271,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
   #runAction(
     actionName: string, params: unknown, opts: { actor: string }, mode: 'run' | 'preview',
   ): ActionResult {
-    this.#refuseOpenTransaction(mode)
+    this.#store.refuseOpenTransaction(mode)
     // From here on the params are raw input: the schema, not the type, decides.
     const raw = params as Record<string, unknown>
     // Every execution attempt is audited, including early refusals. Previews are reads.
@@ -370,7 +281,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       error: Violation,
       edits?: Edit[],
     ): ActionResult => {
-      if (mode === 'run') this.#audit({
+      if (mode === 'run') this.#store.audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -417,7 +328,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
 
     // Execution crashes are audited as EXECUTION_CRASHED. Both modes rethrow.
     const crashed = (e: unknown): never => {
-      if (mode === 'run') this.#audit({
+      if (mode === 'run') this.#store.audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -457,7 +368,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     // synchronous: nothing can change between this dry run and the commit
     // below.)
     try {
-      this.#preflight(edits)
+      this.#store.preflight(edits)
     } catch (e) {
       return refuse(reject('INVALID_EDITS', editErrorMessage(e)))
     }
@@ -469,7 +380,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     // whatever the action is named.
     const sides = new Set<'source' | 'ontology'>()
     for (const edit of edits) {
-      const side = this.#editAuthority(edit)
+      const side = this.#store.editAuthority(edit)
       if (typeof side !== 'string') return refuse(side)
       sides.add(side)
     }
@@ -532,14 +443,11 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
 
     // Edits and their audit entry commit together or not at all.
     try {
-      this.#db.transaction(() => {
-        this.#applyEdits(edits)
-        this.#audit({ actor: opts.actor, action: actionName, target, params: parsed.data, status: 'applied', edits })
-      })()
+      this.#store.commit(edits, { actor: opts.actor, action: actionName, target, params: parsed.data, status: 'applied', edits })
     } catch (e) {
       // The transaction rolled back (its audit entry included) — record the
       // crashed attempt outside it, then surface the error.
-      this.#audit({
+      this.#store.audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -556,325 +464,38 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return { ok: true, edits }
   }
 
+  /** Administrative history, not an actor-scoped object query. */
   auditLog(filter: { action?: ActionName<Model>; status?: 'applied' | 'rejected'; target?: string } = {}): AuditEntry[] {
-    const rows = this.#db.prepare('SELECT * FROM audit_log ORDER BY seq').all() as Array<{
-      seq: number
-      ts: string
-      actor: string
-      action: string
-      target: string
-      params: string
-      status: 'applied' | 'rejected'
-      error: string | null
-      edits: string | null
-    }>
-    return rows
-      .map((r) => ({
-        ...r,
-        params: JSON.parse(r.params) as Record<string, unknown>,
-        error: r.error ? (JSON.parse(r.error) as Violation) : null,
-        edits: r.edits ? (JSON.parse(r.edits) as Edit[]) : null,
-      }))
-      .filter(
-        (e) =>
-          (!filter.action || e.action === filter.action) &&
-          (!filter.status || e.status === filter.status) &&
-          (!filter.target || e.target === filter.target),
-      )
-  }
-
-  // ── Private: the only code that touches object state ──
-
-  /**
-   * Inside a caller's transaction, "committed" would mean "until the caller
-   * rolls the savepoint back" — an applied-and-audited action could be
-   * silently unwound after this runtime reported success. The runtime owns
-   * its transactions or refuses to run.
-   */
-  #refuseOpenTransaction(entry: string): void {
-    if (this.#db.inTransaction) {
-      throw new Error(
-        `${entry}() must not run inside an open transaction — ` +
-          'a commit that is really a savepoint could be rolled back after success was reported',
-      )
-    }
-  }
-
-  #objectDef(type: string): ObjectTypeDef {
-    const def = Object.hasOwn(this.ontology.objects, type) ? this.ontology.objects[type] : undefined
-    if (!def) throw new Error(`unknown object type "${type}"`)
-    return def
-  }
-
-  /**
-   * Which side of the authority line an edit falls on, per the model's
-   * `owned` declarations — or the Violation for an edit no side can legally
-   * hold. Runs after the preflight, so every edit it sees is one the store
-   * would accept (empty modifies included: they were already refused).
-   */
-  #editAuthority(edit: Edit): 'source' | 'ontology' | Violation {
-    if (edit.op === 'link' || edit.op === 'unlink') {
-      const linkDef = Object.hasOwn(this.ontology.links, edit.link) ? this.ontology.links[edit.link] : undefined
-      return linkDef?.owned ? 'ontology' : 'source'
-    }
-    const def = this.#objectDef(edit.object)
-    if (def.owned === true) return 'ontology'
-    if (edit.op === 'create') {
-      return reject(
-        'SOURCE_CREATE_UNSUPPORTED',
-        `cannot create ${edit.object}/${edit.pk}: the type is source-backed, and creation is supported ` +
-          'for ontology-owned types only — creating at the source is undemonstrated, so undeclared',
-      )
-    }
-    const ownedKeys = def.owned ? Object.keys(def.owned) : []
-    const touched = Object.keys(edit.changes)
-    const owned = touched.filter((key) => ownedKeys.includes(key))
-    if (owned.length === 0) return 'source'
-    if (owned.length === touched.length) return 'ontology'
-    return reject(
-      'MIXED_AUTHORITY',
-      `edit on ${edit.object}/${edit.pk} changes source-backed and ontology-owned properties together — split it`,
-    )
-  }
-
-  /**
-   * The single validation gate, and the dry run behind the write-back
-   * guarantee: the exact code that will commit the plan applies it inside a
-   * transaction that always rolls back. No second validator to drift out of
-   * sync with the real one.
-   */
-  #preflight(edits: Edit[]): void {
-    try {
-      this.#db.transaction(() => {
-        this.#applyEdits(edits)
-        throw new Rollback('preflight')
-      })()
-    } catch (e) {
-      if (!(e instanceof Rollback)) throw e
-    }
-  }
-
-  /**
-   * The gate every stored row passes through: the store keeps JSON, so the
-   * value must survive the JSON round trip unchanged — or it would come
-   * back a different value. (That the schema also accepts its own output is
-   * the model author's declared contract; see ObjectTypeDef.properties.)
-   */
-  #storable(type: string, value: Record<string, unknown>): string {
-    if (!isPlainJson(value)) {
-      throw new Error(`${type} row is not plain JSON data — the store cannot hold it faithfully`)
-    }
-    return JSON.stringify(value)
+    return this.#store.auditLog(filter)
   }
 
   /** A read snapshot, scoped to the actor. Hidden and missing objects are alike. */
   #read<O extends ObjectInstance = ObjectInstance>(type: string, pk: string, actor: string): O | undefined {
-    const properties = this.#fetch(type, pk)
+    const properties = this.#store.fetch(type, pk)
     if (properties === undefined) return undefined
+    // Store rows use dynamic names; the public signature restores the model's
+    // name/property pairing. The assertion itself performs no schema validation.
     const object = { type, pk, properties } as O
     return this.#visible(object, actor) ? object : undefined
   }
 
-  #scan<O extends ObjectInstance = ObjectInstance>(type: string, actor: string, filter?: ObjectFilter<O>): O[] {
-    this.#objectDef(type)
-    const rows = this.#db.prepare('SELECT pk, data FROM objects WHERE type = ? ORDER BY pk').all(type) as {
-      pk: string; data: string
-    }[]
-    return rows
-      .map((r) => ({ type, pk: r.pk, properties: JSON.parse(r.data) }) as O)
-      .filter((o) => this.#visible(o, actor))
-      .filter(matcher(filter))
+  #scan(type: string, actor: string): ObjectInstance[] {
+    return this.#store.scan(type).filter((o) => this.#visible(o, actor))
   }
 
-  /** Raw properties without visibility — for internal integrity checks only. */
-  #fetch(type: string, pk: string): Record<string, unknown> | undefined {
-    this.#objectDef(type)
-    const row = this.#db
-      .prepare('SELECT data FROM objects WHERE type = ? AND pk = ?')
-      .get(type, pk) as { data: string } | undefined
-    return row ? JSON.parse(row.data) : undefined
-  }
-
+  // Visibility belongs here: Store's integrity checks need the complete graph,
+  // including endpoints that this particular caller cannot see.
   #visible(object: ObjectInstance, actor: string): boolean {
     const visibility = this.ontology.objects[object.type]?.visibility
     return visibility ? visibility({ object, actor }) : true
   }
-
-  #applyEdits(edits: Edit[]): void {
-    for (const edit of edits) {
-      if (edit.op === 'link' || edit.op === 'unlink') {
-        // Object.hasOwn, not a bare index: prototype names (toString,
-        // __proto__, …) must not masquerade as link types.
-        const linkDef = Object.hasOwn(this.ontology.links, edit.link) ? this.ontology.links[edit.link] : undefined
-        if (!linkDef) throw new Error(`unknown link type "${edit.link}"`)
-        if (edit.op === 'link') {
-          // A link is a statement about two objects — both endpoints must exist.
-          if (!this.#fetch(linkDef.from, edit.from))
-            throw new Error(`cannot link: ${linkDef.from}/${edit.from} does not exist`)
-          if (!this.#fetch(linkDef.to, edit.to))
-            throw new Error(`cannot link: ${linkDef.to}/${edit.to} does not exist`)
-          if (linkDef.kind === 'one-to-many') {
-            const existing = this.#db
-              .prepare('SELECT from_pk FROM links WHERE name = ? AND to_pk = ? AND from_pk != ?')
-              .get(edit.link, edit.to, edit.from) as { from_pk: string } | undefined
-            if (existing)
-              throw new Error(
-                `cannot link: ${linkDef.to}/${edit.to} is already linked to ` +
-                  `${linkDef.from}/${existing.from_pk} via "${edit.link}" (one-to-many — unlink first)`,
-              )
-          }
-          this.#db
-            .prepare('INSERT OR REPLACE INTO links (name, from_pk, to_pk) VALUES (?, ?, ?)')
-            .run(edit.link, edit.from, edit.to)
-        } else {
-          this.#db
-            .prepare('DELETE FROM links WHERE name = ? AND from_pk = ? AND to_pk = ?')
-            .run(edit.link, edit.from, edit.to)
-        }
-        continue
-      }
-      const def = this.#objectDef(edit.object)
-      const schema = this.#schemas.get(edit.object)!
-      // Unknown keys are refused, not silently stripped: zod would strip
-      // them, but the raw edit still travels to the write-back adapter, and
-      // a stripped key would let source and store diverge without a trace.
-      // Object.hasOwn, not `in`: prototype names are unknown keys too.
-      const payload = edit.op === 'create' ? edit.data : edit.changes
-      const unknown = Object.keys(payload).filter((key) => !Object.hasOwn(def.properties, key))
-      if (unknown.length > 0) {
-        throw new Error(`unknown propert${unknown.length > 1 ? 'ies' : 'y'} "${unknown.join('", "')}" on ${edit.object}`)
-      }
-      if (edit.op === 'create') {
-        const data = schema.parse(edit.data)
-        if (String(data[def.primaryKey]) !== edit.pk) {
-          throw new Error(
-            `create pk mismatch for ${edit.object}: edit says "${edit.pk}", data says "${String(data[def.primaryKey])}"`,
-          )
-        }
-        this.#db
-          .prepare('INSERT INTO objects (type, pk, data) VALUES (?, ?, ?)')
-          .run(edit.object, edit.pk, this.#storable(edit.object, data))
-        continue
-      }
-      // modify. A modify that changes nothing is not an edit — refusing it
-      // keeps the authority classification total: every edit has a side.
-      if (Object.keys(edit.changes).length === 0) {
-        throw new Error(`modify on ${edit.object}/${edit.pk} changes nothing`)
-      }
-      if (Object.hasOwn(edit.changes, def.primaryKey) && edit.changes[def.primaryKey] !== edit.pk) {
-        throw new Error(`cannot modify the primary key of ${edit.object}/${edit.pk}`)
-      }
-      const current = this.#fetch(edit.object, edit.pk)
-      if (!current) throw new Error(`cannot modify missing object ${edit.object}/${edit.pk}`)
-      const next = schema.parse({ ...current, ...edit.changes })
-      this.#db
-        .prepare('UPDATE objects SET data = ? WHERE type = ? AND pk = ?')
-        .run(this.#storable(edit.object, next), edit.object, edit.pk)
-      // Ontology-owned changes on a source-backed row also land in the
-      // overlay — the layer load() reapplies over a re-indexed base. A
-      // value set back to its declared default is pruned (compared
-      // structurally, so key order cannot hide "back at default"): clearing
-      // an edit clears the survival obligation with it.
-      if (def.owned && def.owned !== true && this.#editAuthority(edit) === 'ontology') {
-        const defaults = def.owned
-        const row = this.#db
-          .prepare('SELECT patch FROM overlay WHERE type = ? AND pk = ?')
-          .get(edit.object, edit.pk) as { patch: string } | undefined
-        const patch: Record<string, unknown> = row ? (JSON.parse(row.patch) as Record<string, unknown>) : {}
-        for (const key of Object.keys(edit.changes)) {
-          const value = (next as Record<string, unknown>)[key]
-          if (isDeepStrictEqual(value, defaults[key])) delete patch[key]
-          else patch[key] = value
-        }
-        if (Object.keys(patch).length === 0) {
-          this.#db.prepare('DELETE FROM overlay WHERE type = ? AND pk = ?').run(edit.object, edit.pk)
-        } else {
-          this.#db
-            .prepare('INSERT OR REPLACE INTO overlay (type, pk, patch) VALUES (?, ?, ?)')
-            .run(edit.object, edit.pk, JSON.stringify(patch))
-        }
-      }
-    }
-  }
-
-  /** The indexed snapshot must satisfy the model's constraints, same as edits do. */
-  #validateLinks(): void {
-    for (const [name, link] of Object.entries(this.ontology.links)) {
-      const rows = this.#db
-        .prepare('SELECT from_pk, to_pk FROM links WHERE name = ?')
-        .all(name) as Array<{ from_pk: string; to_pk: string }>
-      const parentOf = new Map<string, string>()
-      for (const { from_pk, to_pk } of rows) {
-        if (!this.#fetch(link.from, from_pk))
-          throw new Error(`link "${name}": ${link.from}/${from_pk} does not exist`)
-        if (!this.#fetch(link.to, to_pk))
-          throw new Error(`link "${name}": ${link.to}/${to_pk} does not exist`)
-        if (link.kind === 'one-to-many') {
-          const previous = parentOf.get(to_pk)
-          if (previous !== undefined && previous !== from_pk) {
-            throw new Error(
-              `link "${name}": ${link.to}/${to_pk} is linked to more than one ${link.from} (one-to-many)`,
-            )
-          }
-          parentOf.set(to_pk, from_pk)
-        }
-      }
-    }
-  }
-
-  #audit(entry: {
-    actor: string
-    action: string
-    target: string
-    params: Record<string, unknown>
-    status: 'applied' | 'rejected'
-    error?: Violation
-    edits?: Edit[]
-  }): void {
-    this.#db
-      .prepare(
-        `INSERT INTO audit_log (ts, actor, action, target, params, status, error, edits)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        new Date().toISOString(),
-        entry.actor,
-        entry.action,
-        entry.target,
-        safeJson(entry.params),
-        entry.status,
-        entry.error ? JSON.stringify(entry.error) : null,
-        entry.edits ? safeJson(entry.edits) : null,
-      )
-  }
 }
 
-/**
- * The audit write must never be the thing that fails: a value the log cannot
- * encode is recorded as a placeholder, because a lost audit entry is worse
- * than a lossy one.
- */
-function safeJson(value: unknown): string {
-  try {
-    const encoded = JSON.stringify(value)
-    if (typeof encoded === 'string') return encoded
-  } catch {
-    // fall through to the placeholder
-  }
-  return JSON.stringify({ $unserializable: String(value) })
-}
-
+/** Preserve the supplied model type instead of returning an unspecialized Runtime. */
 export function createRuntime<Model extends OntologyDef>(
   ontology: Model,
   db: Database,
   opts: { writeback?: WritebackAdapter } = {},
 ): Runtime<Model> {
   return new Runtime(ontology, db, opts)
-}
-
-function matcher<O extends ObjectInstance>(filter?: ObjectFilter<O>): (o: O) => boolean {
-  if (!filter) return () => true
-  if (typeof filter === 'function') return filter
-  const entries = Object.entries(filter)
-  return (o: O) => entries.every(([k, v]) => o.properties[k] === v)
 }

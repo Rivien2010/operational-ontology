@@ -151,6 +151,8 @@ Start with the first three files; use the others to follow a particular part of 
 | [`examples/orders/demo.ts`](./examples/orders/demo.ts) | A caller exercising reads, successful writes, refusals, and re-indexing. |
 | [`src/core.ts`](./src/core.ts) | The interpreter: follow the Action branch of `run()` through validation, write-back, and audit. |
 | [`src/model.ts`](./src/model.ts) | The definition helpers, instance shape, and model-derived TypeScript types. |
+| [`src/query.ts`](./src/query.ts) | Evaluated sets, filtering, set algebra, and aggregation. |
+| [`src/store.ts`](./src/store.ts) | SQLite indexing, integrity, owned edits, and atomic local commits. |
 | [`examples/orders/integrate.ts`](./examples/orders/integrate.ts) | How the two legacy schemas become one snapshot. |
 | [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | How an accepted change reaches its source, including refusal of a stale cancellation. |
 | [`src/mcp.ts`](./src/mcp.ts) | How the same model becomes the agent's tool surface. |

@@ -16,6 +16,46 @@ import { orders } from '../examples/orders/ontology.js'
 import { createErpAdapter } from '../examples/orders/erp-adapter.js'
 import pkg from '../package.json' with { type: 'json' }
 
+test('MCP set and aggregate tools reload visible members, validate conditions and remove partially visible groups', async (t) => {
+  const model = defineOntology({ name: 'visibility-sets', objects: {
+    Item: defineObject({ primaryKey: 'id', properties: { id: z.string(), owner: z.string(), category: z.string(), amount: z.number() },
+      visibility: ({ object, actor }) => actor === 'admin' || object.properties.owner === actor }),
+  }, links: {}, actions: {} })
+  const db = new Database(':memory:')
+  const rt = createRuntime(model, db)
+  rt.load({ objects: { Item: [
+    { id: 'I1', owner: 'agent:alice', category: 'A', amount: 10 },
+    { id: 'I2', owner: 'agent:bob', category: 'A', amount: 90 },
+    { id: 'I3', owner: 'agent:alice', category: 'B', amount: 30 },
+  ] } })
+  const server = buildMcpServer(rt, { agent: 'alice' })
+  const [ct, st] = InMemoryTransport.createLinkedPair()
+  const client = new Client({ name: 'sets-test', version: '0.0.0' })
+  await Promise.all([server.connect(st), client.connect(ct)])
+  t.after(async () => { await client.close(); await server.close(); db.close() })
+  async function call(name: string, args: Record<string, unknown>) {
+    const result = await client.callTool({ name, arguments: args })
+    assert.notEqual(result.isError, true, JSON.stringify(result))
+    return JSON.parse((result.content as Array<{ type: 'text'; text: string }>)[0].text)
+  }
+  const ids = (result: { objects: { pk: string }[] }) => result.objects.map((o) => o.pk)
+  assert.deepEqual(ids(await call('union_item', { left: ['I1', 'I2'], right: ['I3', 'I1'] })), ['I1', 'I3'])
+  assert.deepEqual(ids(await call('intersect_item', { left: ['I1', 'I2', 'I3'], right: ['I1', 'I2'] })), ['I1'])
+  assert.deepEqual(ids(await call('subtract_item', { left: ['I1', 'I2', 'I3'], right: ['I1'] })), ['I3'])
+  assert.deepEqual(ids(await call('filter_item', { source: { pks: ['I1', 'I2', 'I3'] }, where: [{ property: 'amount', op: 'gt', value: 20 }] })), ['I3'])
+  const grouped = await call('aggregate_item', { pks: ['I1', 'I2', 'I3'], group_by: 'category', sum: 'amount' })
+  assert.deepEqual(grouped.values, [{ key: 'A', pks: ['I1'], count: 1, sum: 10 }, { key: 'B', pks: ['I3'], count: 1, sum: 30 }])
+  const selected = await call('filter_item', { source: grouped, where: [{ property: 'sum', op: 'gte', value: 20 }] })
+  assert.deepEqual(ids(selected.set), ['I3'])
+  const privileged = rt.aggregate(rt.search('Item', { actor: 'admin' }), { groupBy: 'category', sum: 'amount' })
+  const visibleGroups = await call('filter_item', { source: privileged, where: [] })
+  assert.deepEqual(visibleGroups.values, [{ key: 'B', pks: ['I3'], count: 1, sum: 30 }])
+  for (const args of [{ amount: 10 }, { where: [{ property: 'amount', op: 'eq', value: '10' }] }, { where: [{ property: 'category', op: 'gt', value: 'A' }] }]) {
+    assert.equal((await client.callTool({ name: 'search_item', arguments: args })).isError, true)
+  }
+  assert.deepEqual(rt.auditLog(), [])
+})
+
 async function connectedClient() {
   const legacy = createFixtures()
   const rt = createRuntime(orders, new Database(':memory:'), { writeback: createErpAdapter(legacy) })
@@ -57,7 +97,12 @@ test('the tool surface is generated from the model — and contains no raw data 
     'traverse_customer_orders',
     'traverse_order_notes',
     'traverse_order_products',
-  ])
+    'pivot_customer_orders', 'pivot_order_notes', 'pivot_order_products',
+    'filter_customer', 'filter_note', 'filter_order', 'filter_product',
+    'union_customer', 'union_note', 'union_order', 'union_product',
+    'intersect_customer', 'intersect_note', 'intersect_order', 'intersect_product',
+    'subtract_customer', 'subtract_note', 'subtract_order', 'subtract_product',
+  ].sort())
   for (const name of tools) {
     assert.ok(!/sql|query_raw|update_|insert_|delete_/.test(name), `unexpected raw access tool: ${name}`)
   }
@@ -65,8 +110,8 @@ test('the tool surface is generated from the model — and contains no raw data 
 
 test('an agent can read the model through search and traversal', async () => {
   const { client } = await connectedClient()
-  const search = await client.callTool({ name: 'search_order', arguments: { status: 'shipped' } })
-  const shipped = JSON.parse((search.content as any)[0].text)
+  const search = await client.callTool({ name: 'search_order', arguments: { where: [{ property: 'status', op: 'eq', value: 'shipped' }] } })
+  const shipped = JSON.parse((search.content as any)[0].text).objects
   assert.deepEqual(shipped.map((o: any) => o.pk).sort(), ['N-A-1001', 'S-SO-78'])
   assert.equal(shipped[0].type, 'Order')
   assert.equal(shipped[0].properties.status, 'shipped')
@@ -79,12 +124,12 @@ test('an agent can read the model through search and traversal', async () => {
     name: 'traverse_customer_orders',
     arguments: { source: customer },
   })
-  const ordersOfYamada = JSON.parse((traverse.content as any)[0].text)
+  const ordersOfYamada = JSON.parse((traverse.content as any)[0].text).objects
   assert.deepEqual(ordersOfYamada.map((o: any) => o.pk).sort(), ['N-A-1001', 'N-A-1002'])
   const reverse = await client.callTool({
     name: 'traverse_customer_orders', arguments: { source: ordersOfYamada[0] },
   })
-  assert.deepEqual(JSON.parse((reverse.content as any)[0].text), [customer])
+  assert.deepEqual(JSON.parse((reverse.content as any)[0].text), { type: 'Customer', objects: [customer] })
   for (const args of [
     { source: customer, direction: 'reverse' },
     { source: { type: 'Customer', pk: customer.pk } },
@@ -114,21 +159,22 @@ test('MCP same-type links expose a required direction and validate it', async ()
   const missing = await client.callTool({ name: tool.name, arguments: { source } })
   assert.equal(missing.isError, true)
   const forward = await client.callTool({ name: tool.name, arguments: { source, direction: 'forward' } })
-  assert.deepEqual(JSON.parse((forward.content as any)[0].text).map((o: any) => o.pk), ['E2'])
+  assert.deepEqual(JSON.parse((forward.content as any)[0].text).objects.map((o: any) => o.pk), ['E2'])
   const reverse = await client.callTool({ name: tool.name, arguments: { source, direction: 'reverse' } })
-  assert.deepEqual(JSON.parse((reverse.content as any)[0].text), [])
+  assert.deepEqual(JSON.parse((reverse.content as any)[0].text), { type: 'Employee', objects: [] })
 })
 
 test('an agent can aggregate through the model', async () => {
-  const { client } = await connectedClient()
+  const { client, rt } = await connectedClient()
   const result = await client.callTool({
     name: 'aggregate_order',
-    arguments: { group_by: 'status', sum: 'total' },
+    arguments: { pks: rt.search('Order', { actor: 'agent:test' }).objects.map((o) => o.pk), group_by: 'status', sum: 'total' },
   })
   const groups = JSON.parse((result.content as any)[0].text)
-  assert.equal(groups.pending.count, 4)
-  assert.equal(groups.pending.sum, 32000)
-  assert.equal(groups.shipped.count, 2)
+  assert.equal(groups.set.type, 'Order')
+  assert.equal(groups.values.find((row: any) => row.key === 'pending').count, 4)
+  assert.equal(groups.values.find((row: any) => row.key === 'pending').sum, 32000)
+  assert.equal(groups.values.find((row: any) => row.key === 'shipped').count, 2)
 })
 
 test('the same business rule that gates humans gates the agent', async () => {
@@ -159,7 +205,7 @@ test('the system of record refuses a stale cancellation (guarded write-back)', a
 
 test('aggregate rejects property names the model does not define', async () => {
   const { client } = await connectedClient()
-  const result = await client.callTool({ name: 'aggregate_order', arguments: { group_by: 'nonexistent' } })
+  const result = await client.callTool({ name: 'aggregate_order', arguments: { pks: [], group_by: 'nonexistent' } })
   assert.equal(result.isError, true)
 })
 
@@ -194,13 +240,15 @@ test('wrapped numeric properties (nullable/optional/defaulted/stacked) are still
   for (const [property, expected] of [['score', 5], ['bonus', 3], ['depth', 3]] as const) {
     const result = await client.callTool({
       name: 'aggregate_thing',
-      arguments: { group_by: 'label', sum: property },
+      arguments: { pks: property === 'bonus' ? ['T1', 'T2'] : ['T1'], group_by: 'label', sum: property },
     })
     assert.notEqual(result.isError, true, `${property} should be summable`)
     const groups = JSON.parse((result.content as any)[0].text)
-    assert.equal(groups.a.count, 2)
-    assert.equal(groups.a.sum, expected)
+    assert.equal(groups.values[0].count, property === 'bonus' ? 2 : 1)
+    assert.equal(groups.values[0].sum, expected)
   }
+  const unsupported = await client.callTool({ name: 'aggregate_thing', arguments: { pks: ['T1', 'T2'], group_by: 'label', sum: 'score' } })
+  assert.equal(unsupported.isError, true, 'null is not silently coerced to zero')
 })
 
 test('an agent write creates ontology-owned state that survives re-indexing', async () => {
@@ -216,7 +264,7 @@ test('an agent write creates ontology-owned state that survives re-indexing', as
     name: 'traverse_order_notes',
     arguments: { source: rt.get('Order', 'N-A-1002', { actor: 'agent:test' }) },
   })
-  const notes = JSON.parse((traverse.content as any)[0].text)
+  const notes = JSON.parse((traverse.content as any)[0].text).objects
   assert.deepEqual(notes.map((n: any) => n.pk), ['NOTE-1'])
 })
 

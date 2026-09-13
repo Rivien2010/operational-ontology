@@ -151,6 +151,8 @@ https://github.com/user-attachments/assets/2b811ee7-bff2-4694-b3bf-bf0f6ccc85d5
 | [`examples/orders/demo.ts`](./examples/orders/demo.ts) | 読み取り、書き込みの成功と拒否、再インデックスを呼び出し側から確認する。 |
 | [`src/core.ts`](./src/core.ts) | モデルの実行処理。`run()` の Action 側から検証・書き戻し・監査を辿る。 |
 | [`src/model.ts`](./src/model.ts) | 定義用の関数、インスタンスの形、モデルから導く TypeScript の型。 |
+| [`src/query.ts`](./src/query.ts) | 取得済みの集合、filter、集合演算、集計。 |
+| [`src/store.ts`](./src/store.ts) | SQLite へのインデックス、整合性検査、所有する編集、ローカルの原子的コミット。 |
 | [`examples/orders/integrate.ts`](./examples/orders/integrate.ts) | 2つのレガシースキーマから1つのスナップショットを作る処理。 |
 | [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | 受理した変更をソースに届ける処理。古くなったキャンセルの拒否もここで行う。 |
 | [`src/mcp.ts`](./src/mcp.ts) | 同じモデルをエージェント向けのツール群に変換する処理。 |

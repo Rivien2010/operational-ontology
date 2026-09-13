@@ -1,3 +1,8 @@
+/**
+ * Public entry point: define a model, create a Runtime, then expose it through
+ * MCP if needed. Store and query evaluators remain implementation details;
+ * callers work with typed instances, sets and operation results.
+ */
 export {
   defineObject,
   defineLink,
@@ -12,7 +17,12 @@ export {
   create,
   link,
   unlink,
+  // Model Functions can construct result sets and attach domain-specific metrics.
+  objectSet,
+  aggregationResult,
 } from './core.js'
+// Compile-time contracts only: these exports emit no JavaScript. Runtime
+// validation comes from model schemas and the checks behind the public API.
 export type {
   ObjectTypeDef,
   LinkTypeDef,
@@ -31,6 +41,10 @@ export type {
   ObjectOf,
   ObjectInstance,
   ObjectFilter,
+  ObjectSet,
+  AggregationResult,
+  Where,
+  MetricWhere,
   LinksFrom,
   LinkDirections,
   LinkTarget,
@@ -42,4 +56,5 @@ export type {
   AuditEntry,
   WritebackAdapter,
 } from './core.js'
+// Transport adapter: tool names and input schemas come from the same model.
 export { buildMcpServer } from './mcp.js'

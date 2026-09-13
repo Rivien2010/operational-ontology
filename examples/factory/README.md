@@ -6,9 +6,9 @@ Run `pnpm demo:factory` from the repository root. The demo uses synthetic MES an
 
 On September 8, an equipment inspection identifies an anomaly on PRESS-1. Release inspections had passed, and shipments left on September 7. The investigation is given September 6 as its manufacturing window. It is looking for potentially affected products, not explaining why known defective goods were shipped or estimating when the fault began.
 
-```text
-Equipment → Lot → ShipmentLine ← Shipment ← Customer
-```
+<img src="./assets/ontology-overview.png" alt="Factory ontology with Equipment, Lot, ShipmentLine, Shipment, Customer and ontology-owned ContactTask. customerImpact summarizes shipped-line evidence; createContactTask validates the selection and records the task and evidence links.">
+
+Gray: source-backed state. Orange: ontology-owned state. The diagram shows all object and link types, with selected properties. [Editable SVG](./assets/ontology-overview.svg).
 
 `demo.ts` uses the runtime's filter and pivot operations directly:
 

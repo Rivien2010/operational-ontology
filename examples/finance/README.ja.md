@@ -4,9 +4,9 @@
 
 `pnpm demo:finance` で実行します。すべて架空の口座・取引で、毎回初期状態に戻ります。A・B・C は調査の起点として与えられた口座で、入金件数が多いだけで不正と判定してはいません。アラート検知器や、特定製品の画面を再現する例ではありません。
 
-```text
-送金元 Account ← Transfer → 受取先 Account
-```
+<img src="./assets/ontology-overview.png" alt="金融のオントロジー全体図。Account と Transfer の間に outgoing・incoming のリンクを持つ。recipientSummary が調査範囲内の受取口座の指標と根拠を求め、openInvestigation が対象口座・起点口座・根拠取引と結びつく ontology-owned な Investigation を記録する。">
+
+グレーはソース由来、オレンジはオントロジーが所有する状態です。全オブジェクト型・リンク型を示し、属性は抜粋しています。[編集用 SVG](./assets/ontology-overview.svg)。
 
 `outgoing` と `incoming` は別々の Account → Transfer リンクです。Transfer は ID・日時・整数の円金額を持つオブジェクトなので、口座へ pivot する段階までは複数回の送金と時刻を保持できます。
 

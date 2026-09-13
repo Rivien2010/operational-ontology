@@ -4,9 +4,9 @@
 
 Run `pnpm demo:finance`. All accounts and transfers are fictional, and each run resets them. A, B and C are supplied investigation origins; a high deposit count alone is not treated as proof of wrongdoing. The example does not implement an alert detector or reproduce a vendor's interface.
 
-```text
-Sender Account ← Transfer → Recipient Account
-```
+<img src="./assets/ontology-overview.png" alt="Finance ontology: Account has separate outgoing and incoming links to Transfer. recipientSummary computes scoped recipient metrics and evidence. openInvestigation records an ontology-owned Investigation linked to the target account, origin accounts and evidence transfers.">
+
+Gray: source-backed state. Orange: ontology-owned state. The diagram shows all object and link types, with selected properties. [Editable SVG](./assets/ontology-overview.svg).
 
 `outgoing` and `incoming` are separate Account → Transfer links. Transfer is an object with an ID, timestamp and integer yen amount, so repeated transfers and their timing survive until the investigator chooses to pivot to accounts.
 

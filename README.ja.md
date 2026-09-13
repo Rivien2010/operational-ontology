@@ -30,6 +30,16 @@ pnpm test    # 振る舞いを検証する
 - `assignOrder` と `addOrderNote` がオントロジー自身の状態を保存する。再インデックスでソースのデータが更新されても、担当者とメモは残る。
 - 適用も拒否も含め、アクションの試行が監査ログに残る。
 
+次の3例では、関係と条件から対応対象を探し、判断とその根拠を残すところまで辿ります。
+
+| 例 | 業務上の問いと対応 | 実行 |
+| --- | --- | --- |
+| [工場](./examples/factory/README.ja.md) | 影響が疑われるロットの出荷先はどこか。顧客連絡・再検査の検討タスクを作る。 | `pnpm demo:factory` |
+| [病院](./examples/hospital/README.ja.md) | 患者の要件を満たす病床と看護師はどれか。仮割当を記録する。 | `pnpm demo:hospital` |
+| [金融](./examples/finance/README.ja.md) | 対象口座に共通する受取先はどこか。根拠取引とともに調査ケースを記録する。 | `pnpm demo:finance` |
+
+いずれも架空のデータを使い、集合の探索とモデルに定義した業務ルールを組み合わせます。候補や共通する関係が見つかっただけでは、判断の確定や業務状態の変更にはなりません。
+
 https://github.com/user-attachments/assets/02bb8ca0-a476-4e33-b0ea-25c46c6e9dda
 
 ## なぜ Operational Ontology を定義するのか
@@ -157,7 +167,7 @@ https://github.com/user-attachments/assets/2b811ee7-bff2-4694-b3bf-bf0f6ccc85d5
 | [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | 受理した変更をソースに届ける処理。古くなったキャンセルの拒否もここで行う。 |
 | [`src/mcp.ts`](./src/mcp.ts) | 同じモデルをエージェント向けのツール群に変換する処理。 |
 
-[`tests/`](./tests/) は動作と型の期待値を実行可能な形で示します。API の詳細、処理順序、例外条件は[実装ノート](./IMPLEMENTATION.ja.md)を参照してください。
+[`tests/`](./tests/) は共通仕様の動作と型の期待値を実行可能な形で示します。各例のシナリオテストは、その例のフォルダ内の `scenario.test.ts` に置き、`pnpm test` で両方を実行します。API の詳細、処理順序、例外条件は[実装ノート](./IMPLEMENTATION.ja.md)を参照してください。
 
 ## 実装の範囲と宣言
 

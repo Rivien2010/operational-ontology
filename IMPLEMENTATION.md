@@ -2,7 +2,7 @@
 
 # Implementation notes
 
-The [README](./README.md) introduces the pattern, demo, and scope. This document describes this implementation's API and runtime behavior. The executable checks are in [`tests/`](./tests/), including runtime, type-level, and MCP tests.
+The [README](./README.md) introduces the pattern, demo, and scope. This document describes this implementation's API and runtime behavior. Shared runtime, type-level, and MCP checks are in [`tests/`](./tests/); scenario tests are in `examples/*/scenario.test.ts`. `pnpm test` runs both.
 
 An action execution refusal returns `{ ok: false, error: { code, message } }` and is audited. Preview uses the same result shape without auditing. Programming and storage errors may throw; the write path records them as described below. Query errors are exceptions rather than action refusals.
 
@@ -154,9 +154,13 @@ Effects describe changes as data and must be pure. `modify` changes properties, 
 
 Models may register named reads in `functions` using `defineFunction({ description, params, run })`. For a Function name, `rt.run(name, params, { actor })` validates the parameter schema and calls `run({ params, actor })`; TypeScript derives input params and return types from the definition. Functions return their values directly. Invalid params, unknown names, and implementation errors throw; calls do not enter the action audit log. MCP generates a tool from each definition, with the same input schema and session actor, and marks it with `readOnlyHint`. It awaits asynchronous results and reports caught exceptions as `INTERNAL` errors.
 
-Function implementations must use the caller's actor for their reads and must not perform writes or other side effects. This is a model-author contract, like pure preconditions and effects, not an enforced sandbox.
+For example, `rt.run('customerImpact', { lotIds: ['L1'] }, { actor })` returns a customer aggregation and its shipped-line evidence. The factory model owns the search procedure; the caller supplies the lots and uses the result. Functions can also implement domain reads without an associated Action.
 
-Running several Actions creates independent attempts with separate audit entries. A single action can accept an array parameter and validate and commit its whole local edit plan atomically. Separate successful previews do not establish that the combined plan fits.
+Function implementations must use the caller's actor for their reads and must not perform writes or other side effects. This is a model-author contract, like pure preconditions and effects, not an enforced sandbox. The examples inject a getter for typed read methods in `runtime.ts`; rules and functions use those methods after runtime construction. No new read API is added to `ActionCtx`.
+
+Hospital candidate searches cannot preview the final allocation while a bed or nurse is still unspecified. Its model shares ordinary evaluation functions between `bedSearch`, `nurseSearch` and the final Action. Candidate Functions return `{ set, assessments }`, where every assessment contains an object and an array of `{ code, message }` reasons. There is no partial-preview API or new generic rule-engine interface. Action execution still returns the first refusal through the existing gate.
+
+Running several Actions creates independent attempts with separate audit entries. A single action can accept an array parameter and validate and commit its whole local plan atomically, as `createContactTask` does for its evidence lines. Separate successful previews do not reserve shared resources: hospital plans for P1 and P4 can each pass preview, but applying one consumes the bed and nurse capacity and causes the other to be refused. In the three investigation examples, customer-contact tasks, provisional allocations and investigation cases are ontology-owned objects linked to source facts. They survive re-indexing; they do not imply that a message was sent, a source admission was changed, or an account was frozen. Stored evidence links retain record identities, not immutable copies of source record contents.
 
 ## The authority line, checked
 
@@ -233,7 +237,7 @@ Snapshot semantics, per loaded type: replace the base, reapply the edit layer. T
 These limits describe the current implementation:
 
 - An edit plan cannot mix source-backed and ontology-owned changes; creation is limited to ontology-owned types, as shown in the [authority checks](#the-authority-line-checked).
-- There are no deletes, link properties, or composite keys. The demo leaves order-line quantities in the data layer.
+- There are no deletes, link properties, or composite keys. The orders demo leaves line quantities in the data layer; the factory model represents shipment lines as objects to aggregate affected quantities.
 - `create`, `link`, and `unlink` payloads are checked at runtime; their TypeScript types are not derived from the model. Nested properties follow their Zod schemas and are not made strict by the runtime.
 - Queries use the local SQLite snapshot, with no pagination or result cap. Saved/lazy queries, automatic path history, recursive exploration, federation and runtime schema evolution are outside the implemented API. The audit log is a separate administrative view rather than an object in the graph.
 

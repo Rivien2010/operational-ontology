@@ -30,6 +30,16 @@ The demo follows the [accompanying article](https://www.dataengineeringweekly.co
 - `assignOrder` and `addOrderNote` store state owned by the ontology, which survives re-indexing while source data refreshes;
 - applied and rejected action attempts appear in the audit log.
 
+Three further examples follow relationships and conditions to find the objects to act on, then record the decision and its evidence:
+
+| Example | Business question and response | Run |
+| --- | --- | --- |
+| [Factory](./examples/factory/README.md) | Which customers received potentially affected lots? Create a contact/reinspection task. | `pnpm demo:factory` |
+| [Hospital](./examples/hospital/README.md) | Which bed and nurse meet a patient's requirements? Record a provisional allocation. | `pnpm demo:hospital` |
+| [Finance](./examples/finance/README.md) | Which recipients are shared by selected accounts? Record a case and its evidence transfers. | `pnpm demo:finance` |
+
+These synthetic examples combine set exploration with domain rules in the model. Finding a candidate or common relationship does not itself establish a decision or change the business state.
+
 https://github.com/user-attachments/assets/02bb8ca0-a476-4e33-b0ea-25c46c6e9dda
 
 ## Why define Operational Ontology?
@@ -157,7 +167,7 @@ Start with the first three files; use the others to follow a particular part of 
 | [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | How an accepted change reaches its source, including refusal of a stale cancellation. |
 | [`src/mcp.ts`](./src/mcp.ts) | How the same model becomes the agent's tool surface. |
 
-[`tests/`](./tests/) makes the behavior and typing expectations executable. The [implementation notes](./IMPLEMENTATION.md) explain API details, processing order, and edge cases.
+[`tests/`](./tests/) makes the shared behavior and typing expectations executable; scenario tests live alongside their examples as `scenario.test.ts`. `pnpm test` runs both. The [implementation notes](./IMPLEMENTATION.md) explain API details, processing order, and edge cases.
 
 ## Scope and declared behavior
 

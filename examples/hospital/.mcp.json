@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "hospital": {
+      "command": "pnpm",
+      "args": [
+        "mcp:hospital"
+      ],
+      "env": {
+        "OO_AGENT": "hospital-demo"
+      }
+    }
+  }
+}

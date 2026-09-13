@@ -24,11 +24,12 @@ import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { Database } from 'better-sqlite3'
 
-import { isPlainJson, reject } from './model.js'
+import { defineOntology, isPlainJson, reject } from './model.js'
 import type {
-  ActionCtx, ActionDef, ActionName, Edit, ObjectFilter, ObjectInstance, ObjectName,
+  ActionCtx, ActionDef, ActionName, ActionResult, Edit, ObjectFilter, ObjectInstance, ObjectName,
   ObjectOf, ObjectTypeDef, OntologyDef, ParamsOf, Properties, LinkName, LinksFrom, LinkTarget,
   TraverseOptions, Violation,
+  OperationName, OperationParamsOf, OperationResultOf,
 } from './model.js'
 export * from './model.js'
 
@@ -66,8 +67,6 @@ const editErrorMessage = (e: unknown): string =>
     : e instanceof Error
       ? e.message
       : String(e)
-
-export type ActionResult = { ok: true; edits: Edit[] } | { ok: false; error: Violation }
 
 /**
  * One attempted action, applied or rejected — the instance to an ActionDef's
@@ -120,7 +119,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
   readonly #schemas = new Map<string, z.ZodObject<Properties>>()
 
   constructor(ontology: Model, db: Database, opts: { writeback?: WritebackAdapter } = {}) {
-    this.ontology = ontology
+    this.ontology = defineOntology(ontology)
     this.#db = db
     this.#writeback = opts.writeback
     for (const [name, obj] of Object.entries(ontology.objects)) {
@@ -330,7 +329,25 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return Object.fromEntries(out)
   }
 
-  // ── Write side: there is exactly one door in the API ──
+  /** One entry point for named operations; only actions pass through the write gate. */
+  run<Name extends OperationName<Model>>(
+    name: Name, params: NoInfer<OperationParamsOf<Model, Name>>, opts: { actor: string },
+  ): OperationResultOf<Model, Name> {
+    if (Object.hasOwn(this.ontology.actions, name)) {
+      return this.#runAction(name, params, opts, 'run') as OperationResultOf<Model, Name>
+    }
+    const functions = this.ontology.functions
+    const fn = functions && Object.hasOwn(functions, name) ? functions[name] : undefined
+    if (!fn) throw new Error(`unknown operation "${name}"`)
+    return fn.run({ params: z.object(fn.params).parse(params), actor: opts.actor })
+  }
+
+  /** Validate an action's plan without write-back, commit, or audit. */
+  preview<A extends ActionName<Model>>(actionName: A, params: NoInfer<ParamsOf<Model, A>>, opts: { actor: string }): ActionResult {
+    return this.#runAction(actionName, params, opts, 'preview')
+  }
+
+  // ── Write gate: both run() and preview() check the same rules ──
 
   /**
    * Execute an action. This is the only way the API changes state:
@@ -340,18 +357,20 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
    * audit entry. Validity precedes authority: a plan the store would refuse
    * is INVALID_EDITS, whatever else it is.
    */
-  execute<A extends ActionName<Model>>(actionName: A, params: ParamsOf<Model, A>, opts: { actor: string }): ActionResult {
-    this.#refuseOpenTransaction('execute')
+  #runAction(
+    actionName: string, params: unknown, opts: { actor: string }, mode: 'run' | 'preview',
+  ): ActionResult {
+    this.#refuseOpenTransaction(mode)
     // From here on the params are raw input: the schema, not the type, decides.
     const raw = params as Record<string, unknown>
-    // Every attempt is audited — including the ones that never reach the model.
+    // Every execution attempt is audited, including early refusals. Previews are reads.
     const refuseAs = (
       target: string,
       auditParams: Record<string, unknown>,
       error: Violation,
       edits?: Edit[],
     ): ActionResult => {
-      this.#audit({
+      if (mode === 'run') this.#audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -396,10 +415,9 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     const target = `${action.object}/${pk}`
     const refuse = (error: Violation, edits?: Edit[]): ActionResult => refuseAs(target, parsed.data, error, edits)
 
-    // Crashes are attempts too — audited as EXECUTION_CRASHED, then the
-    // error surfaces to the caller.
+    // Execution crashes are audited as EXECUTION_CRASHED. Both modes rethrow.
     const crashed = (e: unknown): never => {
-      this.#audit({
+      if (mode === 'run') this.#audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -484,17 +502,21 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       )
     }
 
+    if (action.writeback && edits.length > 0 && !this.#writeback) {
+      return refuse(reject('NO_WRITEBACK_ADAPTER', 'action requires write-back but no adapter is configured'))
+    }
+    // Preview is a snapshot of local validity, not a reservation or a source
+    // acknowledgement. run() runs these checks again against current state.
+    if (mode === 'preview') return { ok: true, edits }
+
     // An empty plan changes nothing, so there is nothing to write back —
     // the attempt still commits an audit entry below.
     if (action.writeback && edits.length > 0) {
-      if (!this.#writeback) {
-        return refuse(reject('NO_WRITEBACK_ADAPTER', 'action requires write-back but no adapter is configured'))
-      }
       try {
         // Write-back first: if the system of record refuses, nothing changes
         // here. The adapter gets its own copies: what commits below is the
         // plan that was validated, not whatever the adapter left behind.
-        this.#writeback.apply(structuredClone(edits), {
+        this.#writeback!.apply(structuredClone(edits), {
           action: actionName,
           actor: opts.actor,
           target: structuredClone(object),

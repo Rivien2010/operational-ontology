@@ -4,8 +4,9 @@ import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import { z } from 'zod'
 import {
-  createRuntime, defineAction, defineLink, defineObject, defineOntology, modify, reject,
+  createRuntime, defineAction, defineFunction, defineLink, defineObject, defineOntology, modify, reject,
   type Direction, type ObjectInstance, type ObjectOf, type ParamsOf, type TraverseOptions,
+  type Runtime, type ActionResult,
 } from '../src/index.js'
 
 const objects = {
@@ -54,6 +55,8 @@ assertType<Same<ObjectOf<typeof model, 'Order'>, Order>>()
 assertType<Same<ParamsOf<typeof model, 'cancelOrder'>, { orderId: string; reason: string }>>()
 
 export function compileOnly(rt: ReturnType<typeof createRuntime<typeof model>>, direction: Direction): void {
+  // @ts-expect-error a model without functions has no callable function names
+  rt.run('labels', { prefix: 'order' }, actor)
   // Object names determine the instance shape.
   const maybeOrder = rt.get('Order', 'O1', actor)
   assertType<Same<typeof maybeOrder, Order | undefined>>()
@@ -128,11 +131,16 @@ export function compileOnly(rt: ReturnType<typeof createRuntime<typeof model>>, 
   rt.load({ objects: { Invoice: [] } })
 
   // Action params come from the definition; modify's properties come from the instance.
-  rt.execute('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
+  rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
+  rt.preview('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
+  // @ts-expect-error preview derives action names from the same model
+  rt.preview('deleteEverything', {}, actor)
+  // @ts-expect-error preview requires the action's params
+  rt.preview('cancelOrder', { orderId: 'O1' }, actor)
   // @ts-expect-error unknown action
-  rt.execute('deleteEverything', {}, actor)
+  rt.run('deleteEverything', {}, actor)
   // @ts-expect-error a required param is missing
-  rt.execute('cancelOrder', { orderId: 'O1' }, actor)
+  rt.run('cancelOrder', { orderId: 'O1' }, actor)
   rt.auditLog({ action: 'cancelOrder' })
   // @ts-expect-error unknown action in an audit filter
   rt.auditLog({ action: 'deleteEverything' })
@@ -156,6 +164,38 @@ export function compileOnly(rt: ReturnType<typeof createRuntime<typeof model>>, 
     // @ts-expect-error action targets must be in the object definitions
     object: 'Invoice', targetParam: 'id', params: { id: z.string() }, preconditions: [], effects: () => [],
   })
+}
+
+const functionModel = defineOntology({
+  ...model,
+  functions: {
+    labels: defineFunction({
+      params: { prefix: z.string(), count: z.number().int().positive().default(1) },
+      run: ({ params }) => Array.from({ length: params.count }, () => params.prefix),
+    }),
+    whoAmI: defineFunction({ params: {}, run: async ({ actor }) => actor }),
+  },
+})
+
+export function compileOnlyFunctions(rt: Runtime<typeof functionModel>): void {
+  const labels = rt.run('labels', { prefix: 'order' }, actor)
+  assertType<Same<typeof labels, string[]>>()
+  const identity = rt.run('whoAmI', {}, actor)
+  assertType<Same<typeof identity, Promise<string>>>()
+  const cancelled = rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
+  assertType<Same<typeof cancelled, ActionResult>>()
+  // @ts-expect-error a function name must be declared in the model
+  rt.run('unknownFunction', {}, actor)
+  // @ts-expect-error function inputs come from their schemas
+  rt.run('labels', {}, actor)
+  // @ts-expect-error count is numeric
+  rt.run('labels', { prefix: 'order', count: 'two' }, actor)
+  // @ts-expect-error a different operation's params must not widen the selected name
+  rt.run('labels', { orderId: 'O1', reason: 'duplicate' }, actor)
+  // @ts-expect-error an action requires its own params, even when a function accepts these
+  rt.run('cancelOrder', { prefix: 'order' }, actor)
+  // @ts-expect-error preview validates action plans, not function results
+  rt.preview('labels', { prefix: 'order' }, actor)
 }
 
 function setup() {
@@ -186,10 +226,10 @@ test('reads, traversal, callbacks and action targets share the instance shape', 
   assert.deepEqual(rt.aggregate('Order', {
     ...actor, filter: { status: 'pending' }, groupBy: (o) => o.type, sum: (o) => o.properties.total,
   }), { Order: { count: 1, sum: 100 } })
-  assert.equal(rt.execute('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor).ok, true)
+  assert.equal(rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor).ok, true)
   assert.equal(rt.get('Order', 'O1', actor)!.properties.status, 'cancelled')
   assert.equal(orders[0].properties.status, 'pending', 'an earlier read is a snapshot')
-  assert.equal(rt.execute('cancelOrder', { orderId: 'O2', reason: 'duplicate' }, actor).ok, false)
+  assert.equal(rt.run('cancelOrder', { orderId: 'O2', reason: 'duplicate' }, actor).ok, false)
 })
 
 test('same-type links require direction even at an endpoint with only incoming or outgoing edges', () => {

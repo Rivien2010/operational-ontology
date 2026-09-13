@@ -8,6 +8,7 @@
  *   - per link type:    traverse_<link> (forward and reverse)
  *   - per action:       <action>, guarded by the same preconditions as
  *                       every other caller
+ *   - per function:     <function>, a model-defined read
  *   - plus:             read_audit_log
  *
  * There is intentionally no raw SQL tool and no generic update tool.
@@ -170,12 +171,25 @@ export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpS
         inputSchema: action.params,
       },
       guarded(async (params: Record<string, unknown>, extra: { sessionId?: string }) => {
-        const result = rt.execute(actionName, params, { actor: actorOf(extra) })
+        const result = rt.run(actionName, params, { actor: actorOf(extra) })
         if (!result.ok) {
           return { ...asJson({ error: result.error }), isError: true }
         }
         return asJson({ applied: result.edits })
       }),
+    )
+  }
+
+  for (const [name, fn] of Object.entries(rt.ontology.functions ?? {})) {
+    server.registerTool(
+      toolName(snake(name), `function ${name}`),
+      {
+        description: fn.description ?? `Read through the model's ${name} function.`,
+        inputSchema: fn.params,
+        annotations: { readOnlyHint: true },
+      },
+      guarded(async (params: Record<string, unknown>, extra: { sessionId?: string }) =>
+        asJson(await rt.run(name, params, { actor: actorOf(extra) }))),
     )
   }
 

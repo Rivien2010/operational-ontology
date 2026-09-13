@@ -146,7 +146,9 @@ export type Edit =
   | { op: 'link'; link: string; from: string; to: string }
   | { op: 'unlink'; link: string; from: string; to: string }
 
-/** Describe a change to an instance; only execute() applies it. */
+export type ActionResult = { ok: true; edits: Edit[] } | { ok: false; error: Violation }
+
+/** Describe a change to an instance; only running an action applies it. */
 // Infer the properties from the instance. A patch such as { status: 'lost' }
 // must not widen Order's status to make an invalid change fit.
 export const modify = <Instance extends ObjectInstance>(
@@ -174,7 +176,7 @@ export interface ActionCtx<O = ObjectInstance, P = Record<string, unknown>> {
 }
 
 /**
- * The schema side of an action — its type. Each `execute()` call is one
+ * The schema side of an action — its type. Each `run()` of this action is one
  * instance of it, applied or refused, recorded as an audit entry.
  */
 export interface ActionDef<S extends Properties = Properties, O extends ObjectInstance = ObjectInstance> {
@@ -186,7 +188,8 @@ export interface ActionDef<S extends Properties = Properties, O extends ObjectIn
   params: S
   description?: string
   /**
-   * Business rules. Each precondition may return `reject(code, message)` to
+   * Business rules. Like effects, these must be pure: preview() runs them too.
+   * Each precondition may return `reject(code, message)` to
    * refuse the write. These are domain rules ("a shipped order cannot be
    * cancelled"), not access control — a permission system decides *who* may
    * act; preconditions decide *whether the operation is valid at all*.
@@ -222,6 +225,19 @@ export function defineAction<Objects extends ObjectDefinitions, K extends keyof 
   return def
 }
 
+/** A named domain read. It must not perform writes or other side effects. */
+export interface FunctionDef<S extends Properties = Properties, Result = unknown> {
+  description?: string
+  params: S
+  /** Use the caller's actor for all reads; return values, not applied edits. */
+  run: (ctx: { params: z.output<z.ZodObject<S>>; actor: string }) => Result
+}
+
+/** Infer input params from their schema and the result from the implementation. */
+export function defineFunction<S extends Properties, Result>(def: FunctionDef<S, Result>): FunctionDef<S, Result> {
+  return def
+}
+
 export interface OntologyDef {
   name: string
   objects: ObjectDefinitions
@@ -230,9 +246,15 @@ export interface OntologyDef {
   // defineLink() call inferred — and the model-derived types below need them.
   links: Record<string, LinkTypeDef<any, any>>
   actions: Record<string, ActionDef<any, any>>
+  functions?: Record<string, FunctionDef<any, any>>
 }
 
 export function defineOntology<Model extends OntologyDef>(def: Model): Model {
+  for (const name of Object.keys(def.functions ?? {})) {
+    if (Object.hasOwn(def.actions, name)) {
+      throw new Error(`operation "${name}" is defined as both an action and a function`)
+    }
+  }
   for (const [name, link] of Object.entries(def.links)) {
     for (const end of [link.from, link.to]) {
       if (!Object.hasOwn(def.objects, end)) {
@@ -257,6 +279,17 @@ type PropertiesOf<Definition extends ObjectTypeDef<any>> = z.output<z.ZodObject<
 export type ObjectName<Model extends OntologyDef> = keyof Model['objects'] & string
 export type LinkName<Model extends OntologyDef> = keyof Model['links'] & string
 export type ActionName<Model extends OntologyDef> = keyof Model['actions'] & string
+export type FunctionName<Model extends OntologyDef> = keyof NonNullable<Model['functions']> & string
+export type OperationName<Model extends OntologyDef> = ActionName<Model> | FunctionName<Model>
+/** Select a name first; its definition determines both params and result. */
+export type OperationParamsOf<Model extends OntologyDef, Name extends OperationName<Model>> =
+  Name extends ActionName<Model> ? ParamsOf<Model, Name>
+    : Name extends FunctionName<Model> ? z.input<z.ZodObject<NonNullable<Model['functions']>[Name]['params']>>
+      : never
+export type OperationResultOf<Model extends OntologyDef, Name extends OperationName<Model>> =
+  Name extends ActionName<Model> ? ActionResult
+    : Name extends FunctionName<Model> ? ReturnType<NonNullable<Model['functions']>[Name]['run']>
+      : never
 export type Direction = 'forward' | 'reverse'
 
 /**

@@ -4,7 +4,7 @@
 
 The [README](./README.md) introduces the pattern, demo, and scope. This document describes this implementation's API and runtime behavior. The executable checks are in [`tests/`](./tests/), including runtime, type-level, and MCP tests.
 
-An action refusal returns `{ ok: false, error: { code, message } }` and is audited. Programming and storage errors may throw; the write path records them as described below. Query errors are exceptions rather than action refusals.
+An action execution refusal returns `{ ok: false, error: { code, message } }` and is audited. Preview uses the same result shape without auditing. Programming and storage errors may throw; the write path records them as described below. Query errors are exceptions rather than action refusals.
 
 ## Instances and traversal
 
@@ -43,7 +43,7 @@ MCP reads serialize the same shape. Traversal tools take `{ source: { type, pk, 
 
 ## Visibility and caller identity
 
-Every `get`, `search`, `traverse`, and `aggregate` call carries an `actor`. An object type's optional `visibility` predicate filters reads and action targets. A hidden object behaves like a missing one: `get` returns `undefined`, traversal returns no hidden rows, and `execute` refuses a hidden target with `TARGET_NOT_FOUND`.
+Every `get`, `search`, `traverse`, and `aggregate` call carries an `actor`. An object type's optional `visibility` predicate filters reads and action targets. A hidden object behaves like a missing one: `get` returns `undefined`, traversal returns no hidden rows, and running an action refuses a hidden target with `TARGET_NOT_FOUND`.
 
 Authentication establishes the actor's identity outside the runtime. When an implementation provides authorization, policies belong on object types and actions so every consumer is subject to the same constraints. That placement is a separate design choice from the mechanism used to implement it, such as groups, attributes, or a policy language. Preconditions check business validity. Separating permission from validity is recommended; implementing them as separate mechanisms is not a condition of the pattern.
 
@@ -51,11 +51,17 @@ This reference implementation demonstrates where model-attached policies live an
 
 Over MCP stdio, callers share one actor. `OO_AGENT=<name> pnpm mcp` labels it as `agent:<name>`; this is not authentication. The server generates read tools and action tools from the model and passes calls through the runtime. Action refusals become MCP errors containing `{ error: { code, message } }`; caught runtime exceptions use the `INTERNAL` code. For local store access, see [Transaction ownership](#transaction-ownership).
 
+## Running named operations
+
+`run(name, params, { actor })` accepts names from both `actions` and `functions`. Selecting a name determines the input schema and return type: Actions return `ActionResult`, while Functions return their implementation's result, including a Promise for an async function. Parameter inference cannot widen the selected name to accommodate another operation's inputs. `defineOntology()` and runtime construction reject names shared by an Action and a Function. An unknown operation name throws before dispatch and creates no audit entry.
+
+This replaces `execute()` and the separate Function `call()` entry point; neither remains as an alias. Dynamic callers that previously received an audited `UNKNOWN_ACTION` refusal from `execute()` now receive an exception for an unknown name. Refusals for known Actions remain audited.
+
 ## Executing actions
 
 An action definition must include `preconditions`, using `[]` when there are none. Because business rules at the action govern the write path, having no conditions must also be an explicit decision by the model's author.
 
-`execute(actionName, params, { actor })` follows this order:
+`run(actionName, params, { actor })` follows this order:
 
 1. Validate params and load the target under the actor's visibility policy.
 2. Evaluate preconditions.
@@ -66,6 +72,16 @@ An action definition must include `preconditions`, using `[]` when there are non
 7. Commit the local edits and audit entry in one transaction.
 
 Effects describe changes as data and must be pure. `modify` changes properties, `create` creates an ontology-owned object, and `link` / `unlink` change relationships. The gate checks schemas, object existence, and cardinality before the adapter runs. A create-and-link action such as `addOrderNote` commits its local plan atomically. These edits change instances; model definitions are code reviewed and versioned in git.
+
+## Preview and model-defined functions
+
+`preview(actionName, params, { actor })` shares the execution gate through step 5 and checks that a required write-back adapter exists. It returns `{ ok: true, edits }` or the same local refusal as execution. Its dry run rolls back; it performs no write-back, commits no edits, and records no audit entry, including on refusals and exceptions. Preconditions and effects must not perform side effects. Preview does not reserve resources or ask the source to accept a write. Running the Action re-evaluates current state and the adapter may still refuse a stale source write.
+
+Models may register named reads in `functions` using `defineFunction({ description, params, run })`. For a Function name, `rt.run(name, params, { actor })` validates the parameter schema and calls `run({ params, actor })`; TypeScript derives input params and return types from the definition. Functions return their values directly. Invalid params, unknown names, and implementation errors throw; calls do not enter the action audit log. MCP generates a tool from each definition, with the same input schema and session actor, and marks it with `readOnlyHint`. It awaits asynchronous results and reports caught exceptions as `INTERNAL` errors.
+
+Function implementations must use the caller's actor for their reads and must not perform writes or other side effects. This is a model-author contract, like pure preconditions and effects, not an enforced sandbox.
+
+Collections remain ordinary arrays. Running several Actions creates independent attempts with separate audit entries. A single action can accept an array parameter and validate and commit its whole local edit plan atomically. Separate successful previews do not establish that the combined plan fits.
 
 ## The authority line, checked
 
@@ -94,7 +110,7 @@ The declared ordering is write-back first: the adapter runs before the local com
 
 **The audit log records both failure directions.** A **`WRITEBACK_FAILED`** refusal records the full plan the adapter saw — the adapter may have partially applied it before throwing, since source-side atomicity is the adapter's contract, not this runtime's. The reverse failure is audited as **`COMMIT_FAILED`**, plan included: after a write-back-first action, those edits are what already reached the source. Both entries are raw material for reconciliation.
 
-**"Every attempt is audited" has a stated limit.** It covers every attempt this runtime observed to completion. If the process dies between the source update and the local commit, both the edit and its audit entry are lost. Closing that window would take a persisted pending-invocation record, which this implementation does not have.
+**"Every action attempt is audited" has a stated limit.** It covers calls to known Actions admitted to the write gate and observed to completion. Reads, previews, unknown operation names, and calls refused because of a caller-opened transaction do not enter this log. If the process dies between the source update and the local commit, both the edit and its audit entry are lost. Closing that window would take a persisted pending-invocation record, which this implementation does not have.
 
 A crash inside the write path is audited as **`EXECUTION_CRASHED`** — a storage fault, or model code (a visibility predicate, a precondition, an effects function) that threw. The error then propagates to the caller.
 
@@ -104,7 +120,7 @@ The audit log sits outside the object graph because its contract differs from th
 
 **Preconditions and freshness.** Rules see the indexed snapshot plus applied local edits. The source may have changed since indexing; the runtime does not re-check source invariants itself. The adapter must handle that boundary. The demo's [ERP adapter](./examples/orders/erp-adapter.ts) uses a guarded `UPDATE`, allowing the ERP to refuse a cancellation after an order has shipped.
 
-**Concurrency.** Calls and the adapter interface are synchronous. The example assumes a single writer, so no other action interleaves between preflight and commit. An asynchronous adapter or multiple writers would require an explicit concurrency mechanism; neither is implemented here.
+**Concurrency.** Action execution and the adapter interface are synchronous. The example assumes a single writer, so no other action interleaves between preflight and commit. An asynchronous adapter or multiple writers would require an explicit concurrency mechanism; neither is implemented here.
 
 **Retries.** There are no idempotency keys or deduplication. `cancelOrder` refuses an already-cancelled order through its own precondition, but that does not guarantee every action or external side effect is safe to retry. A caller-supplied note ID can prevent duplicate local creation; it is not a general retry protocol.
 
@@ -114,7 +130,7 @@ An action instance is identified by its occurrence, not its arguments. Two calls
 
 Rollback has three areas of responsibility. Source dataset versioning and rollback belong to the data platform. This runtime applies an action's local edits and audit entry in one SQLite transaction. Consistency across write-back to external systems is a separate design concern: a local rollback cannot undo changes already delivered to a source. This implementation declares its ordering and failure behavior in the [preceding section](#failure-semantics-in-detail).
 
-One rule is enforced: callers cannot wrap the runtime. `execute()` and `load()` refuse to run inside a caller-opened transaction, because inside one, "committed" would really mean "until the caller rolls the savepoint back" — an applied-and-audited action could be undone after the runtime reported success. This is an atomicity guarantee, not an intrusion defense.
+One rule is enforced: callers cannot wrap the runtime. Running an Action and calling `load()` are refused inside a caller-opened transaction, because inside one, "committed" would really mean "until the caller rolls the savepoint back" — an applied-and-audited action could be undone after the runtime reported success. `preview()` refuses the same context to keep validation at the same transaction boundary as execution. This is an atomicity guarantee, not an intrusion defense.
 
 The rest of the boundary is declared, not defended. The runtime is an in-process library: any code that holds the database handle — the caller, a rule, the write-back adapter — can bypass the action gate with a direct `UPDATE`, and no in-process check can prevent that. The contract is therefore: rules and the adapter must not touch the ontology store. The adapter has no reason to — it receives its own copies of the edit plan and the target object, and speaks only to the systems of record.
 

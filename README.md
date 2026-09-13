@@ -67,7 +67,7 @@ Ownership has three forms in the example:
 
 ## The pattern in code
 
-The model is a plain value containing object types, link types, and action types. Each definition has corresponding instances at runtime.
+The model is a plain value containing object types, link types, and action types. These three kinds of definition have corresponding instances at runtime.
 
 | Definition (type) | Runtime instance |
 | --- | --- |
@@ -75,7 +75,9 @@ The model is a plain value containing object types, link types, and action types
 | Link type: `customerOrders` | A connection between a particular customer and order |
 | Action type: `cancelOrder` | One call attempting to cancel a particular order |
 
-Edits describe the changes an action proposes to objects and links. The audit log records execution attempts and their outcomes, including application and refusal. Definitions live in code; instance state and execution records live in the store.
+Edits describe the changes an action proposes to objects and links. The audit log records action execution attempts and their outcomes, including application and refusal. Definitions live in code; instance state and execution records live in the store.
+
+A model can also define read-only **Functions** for business questions such as finding equipment eligible for a job. Consumers get results based on shared business rules without implementing the search conditions themselves.
 
 The model is data rather than classes so the information needed to describe an operation can be enumerated. The method signature in `class Order { cancel() {} }` alone does not expose parameter validation rules or preconditions. This implementation keeps that information in the definition value, so applications can share the model, inspect it at runtime, and generate MCP tools from it.
 
@@ -123,7 +125,7 @@ const ontology = defineOntology({
 })
 ```
 
-Calling `execute('cancelOrder', …)` loads the target and checks the rule. For an allowed write, the runtime validates the edit plan, writes it back, then commits the local edits and audit entry. The effects function only describes changes; the adapter performs the external write.
+Calling `run('cancelOrder', …)` loads the target and checks the rule. For an allowed write, the runtime validates the edit plan, writes it back, then commits the local edits and audit entry. The effects function only describes changes; the adapter performs the external write.
 
 <img src="./assets/action-gate.svg" alt="Every caller — human or AI agent — invokes the named action cancelOrder through the same governed gate. The precondition refuses shipped orders with a machine-readable error; an applied call transitions the status. Every attempt, applied or refused, lands in the audit log. A generic UPDATE path is absent by design.">
 
@@ -147,7 +149,7 @@ Start with the first three files; use the others to follow a particular part of 
 | --- | --- |
 | [`examples/orders/ontology.ts`](./examples/orders/ontology.ts) | The business model: objects, relationships, ownership, and action rules. |
 | [`examples/orders/demo.ts`](./examples/orders/demo.ts) | A caller exercising reads, successful writes, refusals, and re-indexing. |
-| [`src/core.ts`](./src/core.ts) | The interpreter: follow `execute()` through validation, write-back, and audit. |
+| [`src/core.ts`](./src/core.ts) | The interpreter: follow the Action branch of `run()` through validation, write-back, and audit. |
 | [`src/model.ts`](./src/model.ts) | The definition helpers, instance shape, and model-derived TypeScript types. |
 | [`examples/orders/integrate.ts`](./examples/orders/integrate.ts) | How the two legacy schemas become one snapshot. |
 | [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | How an accepted change reaches its source, including refusal of a stale cancellation. |
@@ -172,7 +174,7 @@ An implementation must declare choices that callers can observe. This one makes 
 | Re-indexing | Source-backed state refreshes; ontology-owned state survives. A load that would orphan an owned edit is refused. |
 | Visibility | An object with no policy is visible to everyone. The actor is self-declared; there is no authentication. Audit reads are an unscoped administrative view. |
 
-The runtime demonstrates the pattern with synchronous calls and SQLite. It includes no UI builder, pipeline framework, scalable indexing service, or general authorization system. The write gate is an API contract within the caller's process. These boundaries keep the implementation readable.
+The runtime demonstrates the pattern with synchronous action execution and SQLite. It includes no UI builder, pipeline framework, scalable indexing service, or general authorization system. The write gate is an API contract within the caller's process. These boundaries keep the implementation readable.
 
 Creation is limited to ontology-owned objects; deletes, link properties, and composite keys are unsupported. The [implementation notes](./IMPLEMENTATION.md#current-limits) document the remaining limits and API details. Published versions are in the [release notes](https://github.com/gura105/operational-ontology/releases).
 
@@ -180,7 +182,7 @@ Creation is limited to ontology-owned objects; deletes, link properties, and com
 
 **Isn't this just CRUD with validation?**
 
-The parts are familiar; the configuration is not. Typical CRUD validation lives inside one application, on tables that application owns. Here the model sits on data other systems own, is shared by every consumer (UIs, scripts, agents), routes every business write through actions, audits every attempt, and writes accepted changes back to the systems of record. The closest existing description is a CQRS command layer extracted from the application and placed over someone else's data.
+The parts are familiar; the configuration is not. Typical CRUD validation lives inside one application, on tables that application owns. Here the model sits on data other systems own, is shared by every consumer (UIs, scripts, agents), routes every business write through actions, audits action attempts, and writes accepted changes back to the systems of record. The closest existing description is a CQRS command layer extracted from the application and placed over someone else's data.
 
 **Isn't a knowledge graph writable too?**
 

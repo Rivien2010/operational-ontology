@@ -82,22 +82,23 @@ const lots = rt.filter(produced, (lot) => {
 })
 ```
 
-`aggregate(set, { groupBy, sum? })` groups by one scalar property, always computes `count`, and optionally sums one numeric property. Its result has three parts:
+`aggregate(set, { groupBy, sum? })` groups by one scalar property, always computes `count`, and optionally sums one numeric property. Its result has two parts:
 
 - `set`: the input objects belonging to its groups.
-- `columns`: numeric metric names and their runtime types, such as `{ count: 'number', sum: 'number' }`.
-- `values`: rows containing a scalar `key`, member `pks`, and the declared numeric metrics.
+- `values`: rows containing a scalar `key`, member `pks`, and a `metrics` object such as `{ count: 2, sum: 5000 }`.
 
 ```ts
 const grouped = rt.aggregate(pending, { groupBy: 'status', sum: 'total' })
-const selected = rt.filter(grouped, (row) => (row.sum as number) >= 10000)
+const selected = rt.filter(grouped, (row) => row.metrics.sum >= 10000)
 console.log(selected.values) // Selected rows, with their original metrics
 const targets = selected.set // Order objects belonging to those rows
 ```
 
-There is no separate `having` method. Filtering an aggregation applies the predicate to its rows and retains the union of their corresponding objects; it does not recompute metrics. To filter object properties, use `.set`, then aggregate again explicitly if needed. Filtering to zero rows keeps an empty tagged set and the column declarations. Grouping by a property does not pivot to the type that property might refer to.
+There is no separate `having` method. Filtering an aggregation applies the predicate to its rows and retains the union of their corresponding objects; it does not recompute metrics. To filter object properties, use `.set`, then aggregate again explicitly if needed. Filtering to zero rows keeps an empty tagged set and an empty `values` array. Grouping by a property does not pivot to the type that property might refer to.
 
-Model Functions can return the same `AggregationResult<O>` shape for domain summaries. For example, finance returns recipient **accounts** with `senderCount`, `transactionCount` and `totalAmount`, computed from **transfers**. `aggregationResult(set, columns, values)` validates finite numeric metrics, unique group keys and member references, and forms the corresponding set. Column declarations let local helpers validate the metric values and describe results to clients. TypeScript knows each row's `key` and `pks`; arbitrary metric access yields `unknown` and needs narrowing in a callback. Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Aggregation supports optional/nullable/default wrappers around scalar properties, but grouping by a null or missing value or summing one throws. Automatic path history, recursive traversal, arbitrary transforms, joins and a general aggregation language are not implemented.
+Model Functions can return the same `AggregationResult<O>` shape for domain summaries. For example, finance returns recipient **accounts** with `senderCount`, `transactionCount` and `totalAmount`, computed from **transfers**. `aggregationResult(set, values)` validates finite numeric metrics, unique group keys and member references, and forms the corresponding set. `metrics` is a `Readonly<Record<string, number>>`, with no column declaration. Names are arbitrary: typos and consistent columns across rows are not checked. Producers keep their metric names consistent; reading an absent metric yields `undefined` at runtime. Empty results carry no column list.
+
+Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Aggregation supports optional/nullable/default wrappers around scalar properties, but grouping by a null or missing value or summing one throws. Automatic path history, recursive traversal, arbitrary transforms, joins and a general aggregation language are not implemented.
 
 ## MCP query inputs
 
@@ -257,8 +258,10 @@ These limits describe the current implementation:
 
 The API has changed since v0.3: object reads and `meta.target` use `{ type, pk, properties }`; traversal takes an instance first; actions use `defineAction(objects, definition)`; modifications use `modify(instance, changes)`. Stored rows and audit edit payloads retain their earlier format. Published versions are in the [release notes](https://github.com/gura105/operational-ontology/releases).
 
-For the set API migration: replace array access on `search` / `traverse` with `.objects`, use `pivot` for sets, and replace filter conditions with predicate callbacks. Aggregation now takes an ObjectSet and a property-based `groupBy`, with optional numeric `sum`, and returns `{ set, columns, values }`; link-based or custom metrics belong in model Functions. The older array-return and callback-aggregation forms are not retained as overloads.
+For the set API migration: replace array access on `search` / `traverse` with `.objects`, use `pivot` for sets, and replace filter conditions with predicate callbacks. Aggregation now takes an ObjectSet and a property-based `groupBy`, with optional numeric `sum`, and returns `{ set, values }`; link-based or custom metrics belong in model Functions. The older array-return and callback-aggregation forms are not retained as overloads.
 
 For this branch's type simplification, `TraverseOptions` no longer takes model parameters, and `AggregationResult<O>` no longer takes metric names. Model-dependent name, parameter and link-navigation aliases are removed. Model-specific operation inputs are checked at runtime. Filter clauses and the `Where` type are removed: use local predicates. MCP `search_*` takes `{}`, `aggregate_*` no longer takes `where`, and `filter_*` tools are removed. Move filtering to client-side code and pass selected IDs to subsequent tools.
 
 The unified `run` method is removed: use `execute` for Actions and `call` for Functions. `preview` remains the Action planning method. The callback inside a Function definition is still named `run`. The result type alias changes from `OperationResultOf` to `FunctionResultOf`.
+
+Aggregation results no longer contain `columns`. Put each row's numeric values in `row.metrics` and construct results with `aggregationResult(set, values)`. `rt.filter` still selects metric rows and their corresponding set together.

@@ -44,11 +44,11 @@ const summary = rt.call('recipientSummary', {
   originIds: ['A', 'B', 'C'],
   after: '2026-09-08T12:00:00+09:00', before: '2026-09-09T00:00:00+09:00',
 }, { actor })
-const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
+const selected = rt.filter(summary.aggregation, (row) => row.metrics.senderCount >= 2)
 // selected.set contains Accounts X and W; values retain their metrics.
 ```
 
-The Function returns an account aggregation, per-account evidence transfer/sender sets, and the input scope. Aggregation row `pks` identify recipient accounts. Evidence is kept separately at transfer grain. The caller can inspect the selected account's original records without confusing a deduplicated account count with an amount or a transaction count.
+The Function returns an account aggregation, per-account evidence transfer/sender sets, and the input scope. Each aggregation row holds sender counts, transfer counts and amounts in `metrics`; its `pks` identify recipient accounts. Evidence is kept separately at transfer grain. The caller can inspect the selected account's original records without confusing a deduplicated account count with an amount or a transaction count.
 
 Filtering for at least two senders retains X and W, but the investigator chooses to examine X, the recipient shared by all three origins. X received four transfers totalling 5,100,000 yen. Its registered context suggests it could be a shared payment provider: the three businesses may simply use the same payment service.
 

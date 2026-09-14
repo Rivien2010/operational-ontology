@@ -20,8 +20,8 @@ try {
   console.log('Common to every origin:', common.objects.map((a) => a.pk))
 
   const summary = rt.call('recipientSummary', scope, { actor })
-  console.table(summary.aggregation.values)
-  const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
+  console.table(summary.aggregation.values.map(({ key, metrics }) => ({ key, ...metrics })))
+  const selected = rt.filter(summary.aggregation, (row) => row.metrics.senderCount >= 2)
   console.log('At least two distinct senders:', selected.set.objects.map((a) => a.pk))
   console.log('X has four transfers from three senders, totalling 5,100,000 yen.')
   const account = common.objects[0]

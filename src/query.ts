@@ -20,20 +20,18 @@ export type ObjectFilter<O extends ObjectInstance = ObjectInstance> = (object: O
 /**
  * `set` holds the target objects; each row's `pks` associates metrics with members
  * of that set. `key` labels the group and need not be an object's primary key.
- * Columns are runtime data too, so MCP can inspect custom Function metrics.
  * For metrics derived from other objects (e.g. transfers for an account), a
  * Function returns that evidence separately; pks here still identify set members.
  */
 export interface AggregationResult<O extends ObjectInstance = ObjectInstance> {
   readonly set: ObjectSet<O>
-  readonly columns: Readonly<Record<string, 'number'>>
   readonly values: readonly AggregationRow[]
 }
-/** Group identity is fixed; the declared metric names are runtime data. */
+/** Keep numeric metrics separate from identity; metric names belong to the producer. */
 export interface AggregationRow {
   readonly key: Scalar
   readonly pks: readonly string[]
-  readonly [column: string]: unknown
+  readonly metrics: Readonly<Record<string, number>>
 }
 
 const own = (value: object, key: string) => Object.hasOwn(value, key)
@@ -91,23 +89,18 @@ export function filterObjects<O extends ObjectInstance>(set: ObjectSet<O>, predi
 
 /**
  * Attach metrics to a set without putting derived values in business properties.
- * Validate declared columns and group membership, then retain only referenced
+ * Validate finite metrics and group membership, then retain only referenced
  * objects. Groups may overlap; their combined target set still has unique IDs.
- * Columns and membership are validated even for caller-constructed results.
+ * No column schema is needed. Producers keep their metric names consistent;
+ * callers may construct results too, so membership is checked here.
  */
 export function aggregationResult<O extends ObjectInstance>(
-  set: ObjectSet<O>, columns: Readonly<Record<string, 'number'>>,
-  values: readonly AggregationRow[],
+  set: ObjectSet<O>, values: readonly AggregationRow[],
 ): AggregationResult<O> {
   const input = objectSet(set.type, set.objects)
   const known = new Set(input.objects.map((o) => o.pk))
   const included = new Set<string>()
   const keys = new Set<Scalar>()
-  for (const [column, kind] of Object.entries(columns)) {
-    if (kind !== 'number' || ['key', 'pks', '__proto__', 'constructor', 'prototype'].includes(column)) {
-      throw new Error(`invalid metric column ${column}`)
-    }
-  }
   const rows = values.map((row) => {
     if (!scalar(row.key) || keys.has(row.key) || !Array.isArray(row.pks) || row.pks.length === 0) {
       throw new Error('invalid or duplicate aggregation group')
@@ -118,14 +111,13 @@ export function aggregationResult<O extends ObjectInstance>(
       if (!known.has(pk)) throw new Error(`aggregation refers to unknown object ${pk}`)
       included.add(pk)
     }
-    for (const column of Object.keys(columns)) {
-      const value = (row as Record<string, unknown>)[column]
-      if (!own(row, column) || typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`invalid metric ${column}`)
+    if (!row.metrics || typeof row.metrics !== 'object' || Array.isArray(row.metrics)) throw new Error('invalid metrics')
+    for (const [name, value] of Object.entries(row.metrics)) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`invalid metric ${name}`)
     }
-    if (Object.keys(row).some((key) => key !== 'key' && key !== 'pks' && !own(columns, key))) throw new Error('undeclared metric column')
-    return { ...row, pks }
+    return { key: row.key, pks, metrics: { ...row.metrics } }
   })
-  return { set: objectSet(set.type, input.objects.filter((o) => included.has(o.pk))), columns: { ...columns }, values: rows }
+  return { set: objectSet(set.type, input.objects.filter((o) => included.has(o.pk))), values: rows }
 }
 
 /**
@@ -137,8 +129,8 @@ export function filterAggregation<O extends ObjectInstance>(
   input: AggregationResult<O>, predicate: (row: AggregationRow) => boolean,
 ): AggregationResult<O> {
   if (typeof predicate !== 'function') throw new Error('filter requires a synchronous predicate function')
-  const result = aggregationResult(input.set, input.columns, input.values)
-  return aggregationResult(result.set, result.columns, result.values.filter(predicate))
+  const result = aggregationResult(input.set, input.values)
+  return aggregationResult(result.set, result.values.filter(predicate))
 }
 
 /** Group existing snapshots by one property, retaining each group's members. */
@@ -152,21 +144,19 @@ export function aggregate<O extends ObjectInstance>(
   const input = objectSet(set.type, set.objects)
   // Count unique objects, not paths that reached them. Sum also uses this object
   // grain: aggregate transfers before pivoting to deduplicated recipient accounts.
-  const groups = new Map<Scalar, { key: Scalar; pks: string[]; count: number; sum?: number }>()
+  const groups = new Map<Scalar, { key: Scalar; pks: string[]; metrics: Record<string, number> }>()
   for (const object of input.objects) {
     const key = object.properties[options.groupBy]
     if (!scalar(key)) throw new Error('groupBy requires a non-null scalar value')
-    const row = groups.get(key) ?? { key, pks: [], count: 0, ...(options.sum !== undefined ? { sum: 0 } : {}) }
+    const row = groups.get(key) ?? { key, pks: [], metrics: options.sum === undefined ? { count: 0 } : { count: 0, sum: 0 } }
     row.pks.push(object.pk)
-    row.count++
+    row.metrics.count++
     if (options.sum !== undefined) {
       const amount = object.properties[options.sum]
       if (typeof amount !== 'number' || !Number.isFinite(amount)) throw new Error('sum requires a non-null finite number')
-      row.sum! += amount
+      row.metrics.sum += amount
     }
     groups.set(key, row)
   }
-  const values = [...groups.values()]
-  return options.sum === undefined ? aggregationResult(input, { count: 'number' }, values)
-    : aggregationResult(input, { count: 'number', sum: 'number' }, values)
+  return aggregationResult(input, [...groups.values()])
 }

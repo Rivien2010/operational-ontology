@@ -26,7 +26,7 @@ try {
   console.log('Manufactured units by family:', rt.aggregate(lots, { groupBy: 'family', sum: 'units' }).values)
   const impact = rt.call('customerImpact', { lotIds: lots.objects.map((lot) => lot.pk) }, { actor })
   console.log('Affected shipped quantities, at shipment-line grain:')
-  console.table(impact.aggregation.values)
+  console.table(impact.aggregation.values.map(({ key, metrics }) => ({ key, ...metrics })))
   const customer = customers.objects[0]
   const evidence = impact.evidence.find((e) => e.customerId === customer.pk)!
   const request = {

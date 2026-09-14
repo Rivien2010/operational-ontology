@@ -148,7 +148,7 @@ test('reads, traversal, callbacks and action targets share the instance shape', 
   assert.deepEqual(rt.search('Order', { ...actor, filter: (o) => o.properties.status === 'pending' }).objects, [orders[0]])
   const pending = rt.search('Order', { ...actor, filter: (object) => object.properties.status === 'pending' })
   assert.deepEqual(rt.aggregate(pending, { groupBy: 'status', sum: 'total' }).values,
-    [{ key: 'pending', pks: ['O1'], count: 1, sum: 100 }])
+    [{ key: 'pending', pks: ['O1'], metrics: { count: 1, sum: 100 } }])
   assert.equal(rt.execute('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor).ok, true)
   assert.equal(rt.get('Order', 'O1', actor)!.properties.status, 'cancelled')
   assert.equal(orders[0].properties.status, 'pending', 'an earlier read is a snapshot')

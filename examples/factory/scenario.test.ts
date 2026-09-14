@@ -60,8 +60,8 @@ test('factory impact counts affected line quantities once across converging path
   assert.deepEqual(ids(lots.objects), ['L1', 'L2', 'L3'])
   const impact = rt.call('customerImpact', { lotIds: [...ids(lots.objects), 'L1'] }, { actor })
   assert.deepEqual(impact.aggregation.values, [
-    { key: 'C1', pks: ['C1'], affectedUnits: 50, shipmentCount: 2 },
-    { key: 'C2', pks: ['C2'], affectedUnits: 15, shipmentCount: 1 },
+    { key: 'C1', pks: ['C1'], metrics: { affectedUnits: 50, shipmentCount: 2 } },
+    { key: 'C2', pks: ['C2'], metrics: { affectedUnits: 15, shipmentCount: 1 } },
   ])
   assert.deepEqual(ids(impact.evidence[0].lines.objects), ['SL1', 'SL3', 'SL4'])
   assert.deepEqual(rt.call('customerImpact', { lotIds: [] }, { actor }).aggregation.set, { type: 'Customer', objects: [] })
@@ -75,7 +75,7 @@ for (const status of ['pending', 'held']) {
     rt.load(integrate(sources))
     const impact = rt.call('customerImpact', { lotIds: ['L1', 'L3'] }, { actor })
     assert.deepEqual(impact.aggregation.values, [
-      { key: 'C1', pks: ['C1'], affectedUnits: 10, shipmentCount: 1 },
+      { key: 'C1', pks: ['C1'], metrics: { affectedUnits: 10, shipmentCount: 1 } },
     ])
     assert.deepEqual(ids(impact.evidence[0].lines.objects), ['SL1'], 'exclude unshipped lines and unrelated L4 packed in S1')
     const request = {
@@ -118,9 +118,9 @@ test('MCP clients filter customer-impact metrics locally and record the returned
   }
   const impact = readJson(await client.callTool({ name: 'customer_impact', arguments: { lotIds: ['L1', 'L3'] } })) as
     ReturnType<typeof app.rt.ontology.functions.customerImpact.run>
-  assert.deepEqual(impact.aggregation.values, [{ key: 'C1', pks: ['C1'], affectedUnits: 50, shipmentCount: 2 }])
+  assert.deepEqual(impact.aggregation.values, [{ key: 'C1', pks: ['C1'], metrics: { affectedUnits: 50, shipmentCount: 2 } }])
   // This code runs in the client; only the resulting IDs return to the server.
-  const selectedIds = impact.aggregation.values.filter((row) => (row.affectedUnits as number) >= 40).flatMap((row) => row.pks)
+  const selectedIds = impact.aggregation.values.filter((row) => row.metrics.affectedUnits >= 40).flatMap((row) => row.pks)
   assert.deepEqual(selectedIds, ['C1'])
   assert.deepEqual(app.rt.auditLog(), [])
   const evidence = impact.evidence.find((e) => e.customerId === selectedIds[0])!

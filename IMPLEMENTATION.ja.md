@@ -82,22 +82,23 @@ const lots = rt.filter(produced, (lot) => {
 })
 ```
 
-`aggregate(set, { groupBy, sum? })` は1つのスカラー属性でグループ化し、必ず `count`、任意で1つの数値属性の `sum` を求めます。結果は次の3つを持ちます。
+`aggregate(set, { groupBy, sum? })` は1つのスカラー属性でグループ化し、必ず `count`、任意で1つの数値属性の `sum` を求めます。結果は次の2つを持ちます。
 
 - `set`：各グループに属する入力オブジェクトの集合。
-- `columns`：`{ count: 'number', sum: 'number' }` など、集計列名と実行時の型情報。
-- `values`：スカラーの `key`、対応するオブジェクトの `pks`、宣言した数値の集計列を持つ行。
+- `values`：スカラーの `key`、対応するオブジェクトの `pks`、`{ count: 2, sum: 5000 }` のような `metrics` を持つ行。
 
 ```ts
 const grouped = rt.aggregate(pending, { groupBy: 'status', sum: 'total' })
-const selected = rt.filter(grouped, (row) => (row.sum as number) >= 10000)
+const selected = rt.filter(grouped, (row) => row.metrics.sum >= 10000)
 console.log(selected.values) // 選択された行。集計値は元の値を保つ。
 const targets = selected.set // その行に属する Order の集合
 ```
 
-`having` という別メソッドは作りません。集計結果への filter は述語で行を選び、対応するオブジェクトの和集合を残します。集計値は再計算しません。属性で絞りたければ `.set` を filter し、必要なら明示的に再集計します。0行になっても空の型タグ付き集合と列定義を保持します。groupBy の属性が別の型の ID であっても、その型へ自動的に pivot はしません。
+`having` という別メソッドは作りません。集計結果への filter は述語で行を選び、対応するオブジェクトの和集合を残します。集計値は再計算しません。属性で絞りたければ `.set` を filter し、必要なら明示的に再集計します。0行になっても空の型タグ付き集合と空の `values` 配列を保持します。groupBy の属性が別の型の ID であっても、その型へ自動的に pivot はしません。
 
-モデルの Function も、同じ `AggregationResult<O>` を返せます。例えば金融では、**取引**から求めた `senderCount`・`transactionCount`・`totalAmount` を、対象の**口座**集合に対応させます。`aggregationResult(set, columns, values)` は有限の数値、グループキーの一意性、メンバーの参照を検査し、対応する集合を作ります。列定義は、ローカルのヘルパーが集計値を検査し、クライアントが結果を理解するための情報です。TypeScript は行の `key` と `pks` の型を持ちますが、任意の集計列へのアクセスは `unknown` となり、コールバックでは型の絞り込みが必要です。行の `pks` は対象集合の ID であり、自動的に根拠レコードを意味するものではありません。根拠集合は Function の結果で集計と並べて返し、利用者が選んだ対象に対応するものを取り出します。集計はスカラー属性の optional・nullable・default を認識しますが、null・欠損値をキーにしたり合計したりすると例外になります。自動的な経路履歴、再帰的な走査、任意の transform、結合、汎用的な集計言語は実装しません。
+モデルの Function も、同じ `AggregationResult<O>` を返せます。例えば金融では、**取引**から求めた `senderCount`・`transactionCount`・`totalAmount` を、対象の**口座**集合に対応させます。`aggregationResult(set, values)` は有限の数値、グループキーの一意性、メンバーの参照を検査し、対応する集合を作ります。`metrics` は `Readonly<Record<string, number>>` で、列名の宣言は不要です。集計列名は任意なので、タイプミスや全行に同じ列が揃っているかは検査しません。揃える責任は結果を作る側にあり、存在しない列の参照は実行時には `undefined` になります。0行の結果は列一覧を持ちません。
+
+行の `pks` は対象集合の ID であり、自動的に根拠レコードを意味するものではありません。根拠集合は Function の結果で集計と並べて返し、利用者が選んだ対象に対応するものを取り出します。集計はスカラー属性の optional・nullable・default を認識しますが、null・欠損値をキーにしたり合計したりすると例外になります。自動的な経路履歴、再帰的な走査、任意の transform、結合、汎用的な集計言語は実装しません。
 
 ## MCP のクエリ入力
 
@@ -257,8 +258,10 @@ Function の実装は読み取りに呼び出し元の actor を使い、書き�
 
 v0.3 から API が変わっています。読み取り結果と `meta.target` は `{ type, pk, properties }` となり、走査は最初の引数にインスタンスを取ります。アクション定義は `defineAction(objects, definition)`、変更の記述は `modify(instance, changes)` を使います。保存済みの行と監査ログの edit データの形式は従来どおりです。公開済みの版は [release notes](https://github.com/gura105/operational-ontology/releases) にあります。
 
-集合 API への移行では、`search`・`traverse` の配列アクセスを `.objects` に置き換え、集合からの走査には `pivot`、filterの条件には述語関数を使います。集計は ObjectSet、属性名による `groupBy`、任意の数値属性 `sum` を受け取り、`{ set, columns, values }` を返します。リンクを使う集計や独自指標はモデルの Function に置きます。従来の配列を返す形式とコールバックによる集計形式は、オーバーロードとして残しません。
+集合 API への移行では、`search`・`traverse` の配列アクセスを `.objects` に置き換え、集合からの走査には `pivot`、filterの条件には述語関数を使います。集計は ObjectSet、属性名による `groupBy`、任意の数値属性 `sum` を受け取り、`{ set, values }` を返します。リンクを使う集計や独自指標はモデルの Function に置きます。従来の配列を返す形式とコールバックによる集計形式は、オーバーロードとして残しません。
 
 このブランチの型の簡略化では、`TraverseOptions` のモデル引数と、`AggregationResult<O>` の集計列名の型引数を削除しています。モデルから名前・パラメータ・リンクの導線を導く型エイリアスも削除しました。モデル固有の操作入力は実行時に検査します。filterの条件句と `Where` 型は削除したため、ローカルの述語を使ってください。MCPの `search_*` は `{}` を受け取り、`aggregate_*` の `where` と `filter_*` ツールは削除しました。filterはクライアント側のコードへ移し、選んだIDを後続のツールに渡します。
 
 呼び出し API は `run` を廃止し、Action は `execute`、Function は `call` を使います。`preview` は Action の事前確認として残します。Function 定義内のコールバック名は `run` のままです。戻り値の型エイリアスは `OperationResultOf` から `FunctionResultOf` に変わります。
+
+集計結果の `columns` は削除しました。各行の集計値は `row.metrics` に置き、`aggregationResult(set, values)` で構築します。`rt.filter` は引き続き集計行と対応する集合を一緒に選択します。

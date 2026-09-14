@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { z } from 'zod'
 import {
   aggregationResult, createRuntime, defineLink, defineObject, defineOntology, objectSet,
-  type AggregationResult, type ObjectOf, type ObjectSet, type Runtime,
+  type AggregationResult, type AggregationRow, type ObjectOf, type ObjectSet, type Runtime,
 } from '../src/index.js'
 import { aggregate, combine, filterAggregation, filterObjects } from '../src/query.js'
 
@@ -99,37 +99,56 @@ test('filtering aggregate rows keeps the corresponding members and does not reco
   const rt = runtime(t)
   const input = rt.search('Lot', { actor: 'admin' })
   const grouped = rt.aggregate(input, { groupBy: 'family', sum: 'units' })
-  assert.deepEqual(grouped.columns, { count: 'number', sum: 'number' })
   assert.deepEqual(grouped.values, [
-    { key: 'A', pks: ['L1', 'L2', 'L3'], count: 3, sum: 90 },
-    { key: 'B', pks: ['L4'], count: 1, sum: 50 },
+    { key: 'A', pks: ['L1', 'L2', 'L3'], metrics: { count: 3, sum: 90 } },
+    { key: 'B', pks: ['L4'], metrics: { count: 1, sum: 50 } },
   ])
-  const selected = rt.filter(grouped, (row) => (row.count as number) >= 2 && (row.sum as number) >= 80)
+  const selected = rt.filter(grouped, (row) => row.metrics.count >= 2 && row.metrics.sum >= 80)
   assert.deepEqual(ids(selected.set), ['L1', 'L2', 'L3'])
-  assert.equal(selected.values[0].sum, 90)
+  assert.equal(selected.values[0].metrics.sum, 90)
   const larger = rt.filter(selected.set, (lot) => lot.properties.units >= 30)
   assert.deepEqual(ids(larger), ['L1', 'L2'])
-  assert.equal(selected.values[0].sum, 90)
-  assert.equal(rt.aggregate(larger, { groupBy: 'family', sum: 'units' }).values[0].sum, 70)
-  const none = rt.filter(selected, (row) => (row.count as number) > 3)
-  assert.deepEqual(none, { set: { type: 'Lot', objects: [] }, columns: { count: 'number', sum: 'number' }, values: [] })
+  assert.equal(selected.values[0].metrics.sum, 90)
+  assert.equal(rt.aggregate(larger, { groupBy: 'family', sum: 'units' }).values[0].metrics.sum, 70)
+  const none = rt.filter(selected, (row) => row.metrics.count > 3)
+  assert.deepEqual(none, { set: { type: 'Lot', objects: [] }, values: [] })
   assert.deepEqual(rt.auditLog(), [])
 })
 
 test('custom Function metrics use the same aggregation contract', () => {
   const set = lots()
-  const result = aggregationResult(set, { senderCount: 'number', totalAmount: 'number' }, [
-    { key: 'X', pks: ['L1', 'L2'], senderCount: 3, totalAmount: 5100000 },
-    { key: 'Y', pks: ['L3'], senderCount: 1, totalAmount: 100000 },
+  const result = aggregationResult(set, [
+    { key: 'X', pks: ['L1', 'L2'], metrics: { senderCount: 3, totalAmount: 5100000 } },
+    { key: 'Y', pks: ['L3'], metrics: { senderCount: 1, totalAmount: 100000 } },
   ])
-  const selected = filterAggregation(result, (row) => (row.senderCount as number) >= 2)
+  const selected = filterAggregation(result, (row) => row.metrics.senderCount >= 2)
   assert.deepEqual(ids(selected.set), ['L1', 'L2'])
-  assert.equal(selected.values[0].totalAmount, 5100000)
-  assert.throws(() => aggregationResult(set, { count: 'number' }, [{ key: 'A', pks: ['missing'], count: 1 }]), /unknown object/)
-  assert.throws(() => aggregationResult(set, { count: 'number' }, [{ key: 'A', pks: ['L1'], count: NaN }]), /invalid metric/)
+  assert.equal(selected.values[0].metrics.totalAmount, 5100000)
+  assert.throws(() => aggregationResult(set, [{ key: 'A', pks: ['missing'], metrics: { count: 1 } }]), /unknown object/)
+  assert.throws(() => aggregationResult(set, [{ key: 'A', pks: ['L1'], metrics: { count: NaN } }]), /invalid metric/)
   assert.throws(() => filterAggregation(result, [] as never), /predicate function/)
   assert.deepEqual(aggregate(objectSet('Lot', [] as Lot[]), { groupBy: 'family' }, fields),
-    { set: { type: 'Lot', objects: [] }, columns: { count: 'number' }, values: [] })
+    { set: { type: 'Lot', objects: [] }, values: [] })
+})
+
+test('aggregation keeps identity separate from metrics without requiring a column schema', () => {
+  const set = lots()
+  const metrics = { key: 1, pks: 2 }
+  const rows: AggregationRow[] = [
+    { key: 'A', pks: ['L1', 'L1'], metrics },
+    { key: 'B', pks: ['L1', 'L2'], metrics: { sum: 30 } },
+  ]
+  const result = aggregationResult(set, rows)
+  assert.deepEqual(ids(result.set), ['L1', 'L2'], 'overlapping groups still have a unique target set')
+  assert.deepEqual(result.values[0], { key: 'A', pks: ['L1'], metrics: { key: 1, pks: 2 } })
+  metrics.key = 99
+  assert.equal(result.values[0].metrics.key, 1, 'result metrics are copied')
+  assert.deepEqual(ids(filterAggregation(result, (row) => row.key === 'B').set), ['L1', 'L2'])
+  assert.throws(() => aggregationResult(set, [rows[0], rows[0]]), /duplicate aggregation group/)
+  assert.throws(() => aggregationResult(set, [{ key: 'A', pks: [], metrics: {} }]), /invalid.*group/)
+  for (const metrics of [null, [], { count: NaN }, { count: Infinity }, { count: 'two' }]) {
+    assert.throws(() => aggregationResult(set, [{ key: 'A', pks: ['L1'], metrics: metrics as never }]), /invalid metric/)
+  }
 })
 
 test('pivot deduplicates, preserves empty target tags and rechecks visibility and direction', (t) => {
@@ -161,9 +180,13 @@ export function compileOnly(rt: Runtime<Model>) {
   rt.filter(input, { quality: 'suspect' })
   // @ts-expect-error serialized conditions are no longer supported
   rt.filter(input, [{ property: 'units', op: 'approximately', value: 40 }])
-  const custom = aggregationResult(input, { senderCount: 'number' }, [{ key: 'X', pks: ['L1'], senderCount: 3 }])
-  const selected: AggregationResult<Lot> = rt.filter(custom, (row) => (row.senderCount as number) >= 2)
+  const custom = aggregationResult(input, [{ key: 'X', pks: ['L1'], metrics: { senderCount: 3 } }])
+  const selected: AggregationResult<Lot> = rt.filter(custom, (row) => row.metrics.senderCount >= 2)
   const exact: ObjectSet<Lot> = selected.set
+  // @ts-expect-error metrics are numeric
+  aggregationResult(input, [{ key: 'X', pks: ['L1'], metrics: { count: 'three' } }])
+  // @ts-expect-error metric snapshots are readonly
+  selected.values[0].metrics.senderCount = 4
   // These are accepted by TypeScript and rejected by the runtime tests below.
   rt.union(input, equipment)
   objectSet('Equipment', input.objects)
@@ -185,6 +208,6 @@ test('public APIs reject model-specific mistakes without TypeScript navigation c
   assert.throws(() => rt.aggregate(empty, { groupBy: 'unknown' }), /invalid groupBy/)
   assert.throws(() => rt.aggregate(input, { groupBy: 'family', sum: 'quality' }), /sum requires a numeric property/)
   const grouped = rt.aggregate(input, { groupBy: 'family' })
-  assert.deepEqual(ids(rt.filter(grouped, (row) => typeof row.count === 'number' && row.count >= 2).set), ['L1', 'L2', 'L3'])
+  assert.deepEqual(ids(rt.filter(grouped, (row) => row.metrics.count >= 2).set), ['L1', 'L2', 'L3'])
   assert.deepEqual(rt.auditLog(), [], 'query errors never perform writes or audit actions')
 })

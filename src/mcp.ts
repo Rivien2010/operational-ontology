@@ -115,7 +115,7 @@ export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, op
     server.registerTool(
       toolName(`aggregate_${snake(typeName)}`, `aggregate ${typeName}`),
       {
-        description: `Group the selected ${typeName} objects by one property, count members and optionally sum a numeric property. Returns set, numeric columns, and values with member pks. Filter metric rows in client-side code and use their pks to continue exploring.`,
+        description: `Group the selected ${typeName} objects by one property, count members and optionally sum a numeric property. Returns set and values; each row has a key, member pks and a numeric metrics object. Filter metric rows in client-side code and use their pks to continue exploring.`,
         inputSchema: z.object(aggregateShape).strict(),
       },
       guarded(async (rawArgs: Record<string, unknown>, extra: { sessionId?: string }) => {

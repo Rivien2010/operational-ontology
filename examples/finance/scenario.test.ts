@@ -30,8 +30,8 @@ test('finance distinguishes recipient intersection, distinct senders and repeate
   const summary = rt.call('recipientSummary', { ...scope, originIds: ['A', 'B', 'C', 'A'] }, { actor })
   assert.deepEqual(summary.scope.originIds, ['A', 'B', 'C'])
   const x = summary.aggregation.values.find((row) => row.key === 'X')!
-  assert.deepEqual(x, { key: 'X', pks: ['X'], senderCount: 3, transactionCount: 4, totalAmount: 5100000 })
-  const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
+  assert.deepEqual(x, { key: 'X', pks: ['X'], metrics: { senderCount: 3, transactionCount: 4, totalAmount: 5100000 } })
+  const selected = rt.filter(summary.aggregation, (row) => row.metrics.senderCount >= 2)
   assert.deepEqual(ids(selected.set.objects).sort(), ['W', 'X'])
   const evidence = summary.evidence.find((e) => e.accountId === 'X')!
   assert.deepEqual(ids(evidence.transfers.objects), ['T1a', 'T1b', 'T3', 'T4'])
@@ -107,10 +107,10 @@ test('MCP combines client-side date/metric filters with pivots and a validated c
   const recipients = await call<ObjectSet>('pivot_incoming', { source: { type: 'Transfer', pks: ids(afternoon) } })
   assert.deepEqual(ids(recipients.objects).sort(), ['W', 'X', 'Y', 'Z'])
   const summary = await call<{ aggregation: AggregationResult<ObjectOf<Finance, 'Account'>> }>('recipient_summary', scope)
-  const selected = summary.aggregation.values.filter((row) => (row.senderCount as number) >= 2)
+  const selected = summary.aggregation.values.filter((row) => row.metrics.senderCount >= 2)
   const selectedIds = [...new Set(selected.flatMap((row) => row.pks))]
   assert.deepEqual(selectedIds.sort(), ['W', 'X'])
-  assert.equal(selected.find((row) => row.key === 'X')!.totalAmount, 5100000)
+  assert.equal(selected.find((row) => row.key === 'X')!.metrics.totalAmount, 5100000)
   assert.deepEqual(app.rt.auditLog(), [])
   await call('open_investigation', request)
   assert.equal(app.rt.auditLog()[0].actor, 'agent:reviewer')

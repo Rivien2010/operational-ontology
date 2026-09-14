@@ -118,10 +118,12 @@ export function createFactoryOntology(read: () => FactoryRead) {
             const customerLines = read().pivot(read().traverse(customer, 'customerShipments', { actor }), 'shipmentLines', { actor })
             return { customerId: customer.pk, lines: read().intersect(lines, customerLines) }
           })
-          const aggregation = aggregationResult(customers, { affectedUnits: 'number', shipmentCount: 'number' }, evidence.map((row) => ({
+          const aggregation = aggregationResult(customers, evidence.map((row) => ({
             key: row.customerId, pks: [row.customerId],
-            affectedUnits: row.lines.objects.reduce((sum, line) => sum + (line.properties.units as number), 0),
-            shipmentCount: read().pivot(row.lines, 'shipmentLines', { actor }).objects.length,
+            metrics: {
+              affectedUnits: row.lines.objects.reduce((sum, line) => sum + (line.properties.units as number), 0),
+              shipmentCount: read().pivot(row.lines, 'shipmentLines', { actor }).objects.length,
+            },
           })))
           return { aggregation, evidence }
         },

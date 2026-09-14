@@ -44,11 +44,11 @@ const summary = rt.call('recipientSummary', {
   originIds: ['A', 'B', 'C'],
   after: '2026-09-08T12:00:00+09:00', before: '2026-09-09T00:00:00+09:00',
 }, { actor })
-const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
+const selected = rt.filter(summary.aggregation, (row) => row.metrics.senderCount >= 2)
 // selected.set は口座 X・W。values はそれぞれの集計値を保持する。
 ```
 
-Function は口座の集計、口座ごとの根拠取引・送金元集合、入力した調査範囲を返します。集計行の `pks` は受取口座の ID です。根拠は取引の粒度で別に保持します。利用者は、重複排除した口座数と金額・取引件数を混同せず、選んだ口座の元記録を確認できます。
+Function は口座の集計、口座ごとの根拠取引・送金元集合、入力した調査範囲を返します。集計行の `metrics` に送金元数・取引件数・金額が入り、`pks` は受取口座の ID です。根拠は取引の粒度で別に保持します。利用者は、重複排除した口座数と金額・取引件数を混同せず、選んだ口座の元記録を確認できます。
 
 集計条件を「2口座以上から受け取る」にすると X・W が残りますが、今回の担当者は3口座すべてに共通する X を確認することにします。X には4件、計510万円が送られています。ただし登録情報を見ると、X は共通の決済事業者である可能性があります。3口座が同じ決済サービスを利用しているなら、業務上の説明がつくかもしれません。
 

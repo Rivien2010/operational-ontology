@@ -46,8 +46,8 @@ test('MCP clients filter locally and pass IDs to tools that reload visible membe
   const selected = found.objects.filter((object: { properties: { amount: number } }) => object.properties.amount > 20)
   assert.deepEqual(selected.map((object: { pk: string }) => object.pk), ['I3'])
   const grouped = await call('aggregate_item', { pks: ['I1', 'I2', 'I3'], group_by: 'category', sum: 'amount' })
-  assert.deepEqual(grouped.values, [{ key: 'A', pks: ['I1'], count: 1, sum: 10 }, { key: 'B', pks: ['I3'], count: 1, sum: 30 }])
-  const selectedIds = grouped.values.filter((row: { sum: number }) => row.sum >= 20).flatMap((row: { pks: string[] }) => row.pks)
+  assert.deepEqual(grouped.values, [{ key: 'A', pks: ['I1'], metrics: { count: 1, sum: 10 } }, { key: 'B', pks: ['I3'], metrics: { count: 1, sum: 30 } }])
+  const selectedIds = grouped.values.filter((row: { metrics: Record<string, number> }) => row.metrics.sum >= 20).flatMap((row: { pks: string[] }) => row.pks)
   assert.deepEqual(selectedIds, ['I3'])
   // The next tool rechecks current visibility, even for IDs from an earlier read.
   rt.load({ objects: { Item: [{ id: 'I3', owner: 'agent:bob', category: 'B', amount: 30 }] } })
@@ -179,9 +179,9 @@ test('an agent can aggregate through the model', async () => {
   })
   const groups = JSON.parse((result.content as any)[0].text)
   assert.equal(groups.set.type, 'Order')
-  assert.equal(groups.values.find((row: any) => row.key === 'pending').count, 4)
-  assert.equal(groups.values.find((row: any) => row.key === 'pending').sum, 32000)
-  assert.equal(groups.values.find((row: any) => row.key === 'shipped').count, 2)
+  assert.equal(groups.values.find((row: any) => row.key === 'pending').metrics.count, 4)
+  assert.equal(groups.values.find((row: any) => row.key === 'pending').metrics.sum, 32000)
+  assert.equal(groups.values.find((row: any) => row.key === 'shipped').metrics.count, 2)
 })
 
 test('the same business rule that gates humans gates the agent', async () => {
@@ -251,8 +251,8 @@ test('wrapped numeric properties (nullable/optional/defaulted/stacked) are still
     })
     assert.notEqual(result.isError, true, `${property} should be summable`)
     const groups = JSON.parse((result.content as any)[0].text)
-    assert.equal(groups.values[0].count, property === 'bonus' ? 2 : 1)
-    assert.equal(groups.values[0].sum, expected)
+    assert.equal(groups.values[0].metrics.count, property === 'bonus' ? 2 : 1)
+    assert.equal(groups.values[0].metrics.sum, expected)
   }
   const unsupported = await client.callTool({ name: 'aggregate_thing', arguments: { pks: ['T1', 'T2'], group_by: 'label', sum: 'score' } })
   assert.equal(unsupported.isError, true, 'null is not silently coerced to zero')

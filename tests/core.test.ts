@@ -1070,7 +1070,7 @@ test('aggregation happens at query time', () => {
   const rt = setup()
   const orders = rt.search('Order', asTest)
   const byStatus = rt.aggregate(orders, { groupBy: 'status', sum: 'total' })
-  assert.deepEqual(byStatus.values.map(({ key, count, sum }) => ({ key, count, sum })), [
+  assert.deepEqual(byStatus.values.map(({ key, metrics }) => ({ key, ...metrics })), [
     { key: 'shipped', count: 1, sum: 100 }, { key: 'pending', count: 1, sum: 200 },
   ])
   assert.deepEqual(byStatus.set, orders)
@@ -1082,7 +1082,7 @@ test('aggregation is immune to prototype-named groups', () => {
   orders.objects[0].properties.id = '__proto__'
   orders.objects[1].properties.id = 'toString'
   const groups = rt.aggregate(orders, { groupBy: 'id' })
-  assert.deepEqual(groups.values.map(({ key, count }) => [key, count]), [['__proto__', 1], ['toString', 1]])
+  assert.deepEqual(groups.values.map(({ key, metrics }) => [key, metrics.count]), [['__proto__', 1], ['toString', 1]])
   assert.equal(({} as Record<string, unknown>).count, undefined)
 })
 

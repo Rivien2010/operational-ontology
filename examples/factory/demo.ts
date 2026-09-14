@@ -1,5 +1,4 @@
 /** Run: pnpm demo:factory. Source databases and the store are reset in memory. */
-import { integrate } from './integrate.js'
 import { createFactory } from './runtime.js'
 import { heading as h, log, showObjects, trace } from '../demo-output.js'
 
@@ -9,6 +8,7 @@ const actor = 'user:factory-ops'
 const window = { after: '2026-09-06T00:00:00+09:00', before: '2026-09-07T00:00:00+09:00' }
 try {
   h('1. Read: an inspection finding sets the investigation scope')
+  log('Goal: find whom to contact, identify the shipped products and quantities, then record a contact task.')
   log('September 8: an equipment inspection found an anomaly. Release inspections had passed; goods shipped September 7.')
   log('September 6 is the supplied investigation window, not an inferred failure interval.')
   const allEquipment = rt.search('Equipment', { actor })
@@ -29,6 +29,7 @@ try {
   log('L2 falls outside the supplied manufacturing window.')
   const lines = rt.pivot(lots, 'lotLines', { actor })
   trace('Pivot lotLines (forward): Lot → ShipmentLine', { lots }, lines)
+  showObjects('Save set A: lines from the selected lots, including unshipped goods', lines)
   const allShipments = rt.pivot(lines, 'shipmentLines', { actor })
   trace('Pivot shipmentLines (reverse): ShipmentLine → Shipment', { lines }, allShipments)
   console.table(allShipments.objects.map(({ pk, properties }) => ({ shipment: pk, status: properties.status })))
@@ -42,40 +43,39 @@ try {
   h('3. Transform: retain shipped evidence and aggregate impact')
   const packedLines = rt.pivot(shipments, 'shipmentLines', { actor })
   trace('Pivot shipmentLines (forward): return to the shipped contents', { shipments }, packedLines)
+  showObjects('Set B: contents of the shipped shipments, including unrelated lots', packedLines)
   const shippedAffected = rt.intersect(lines, packedLines)
-  trace('Intersect: affected lines ∩ shipped contents', { affectedLines: lines, packedLines }, shippedAffected)
+  trace('Intersect A ∩ B: affected lines ∩ shipped contents', { A: lines, B: packedLines }, shippedAffected)
   log('SL5 is affected but unshipped; SL6 is shipped but belongs to unrelated L4. Neither survives the intersection.')
-  const manufactured = rt.aggregate(lots, { groupBy: 'family', sum: 'units' })
-  log('\n  Aggregate: group selected lots by family, count lots and sum manufactured units')
-  showObjects('input', lots)
-  console.table(manufactured.values.map(({ key, pks, metrics }) => ({ family: key, lots: pks.join(', '), ...metrics })))
-  log('\n  Function customerImpact: calculate shipped quantities and retain their evidence')
-  log('    params:', { lotIds: lots.objects.map((lot) => lot.pk) })
-  const impact = rt.call('customerImpact', { lotIds: lots.objects.map((lot) => lot.pk) }, { actor })
-  showObjects('customers', impact.aggregation.set)
-  console.table(impact.aggregation.values.map(({ key, metrics }) => ({ key, ...metrics })))
-  for (const row of impact.evidence) showObjects(`evidence for ${row.customerId}`, row.lines)
-  log('The 60 manufactured units and 50 affected shipped units answer different questions; quantities retain their original record grain.')
+  log('\n  Aggregate: sum units on the retained ShipmentLine records')
+  showObjects('input', shippedAffected)
+  console.table(shippedAffected.objects.map(({ pk, properties }) => ({ line: pk, units: properties.units })))
+  const affectedUnits = shippedAffected.objects.reduce((sum, line) => sum + (line.properties.units as number), 0)
+  log('Units in evidence:', affectedUnits)
+  log('These are 50 shipped units: 10 + 20 + 20. The selected lots contain 60 units including 10 unshipped; the shipped shipments contain 55 including 5 from L4.')
 
   h('4. Write: record a customer contact task with its evidence')
   const customer = customers.objects[0]
-  const evidence = impact.evidence.find((e) => e.customerId === customer.pk)!
+  log('Contact summary:', { customer: customer.pk, lots: lots.objects.map((lot) => lot.pk), shipments: shipments.objects.length, lines: shippedAffected.objects.length, affectedUnits })
+  // This is the same evidence set we just intersected and summed.
   const request = {
     customerId: customer.pk, equipmentId: equipment.objects[0].pk, taskId: 'CONTACT-C1', ...window,
-    lineIds: evidence.lines.objects.map((line) => line.pk),
+    lineIds: shippedAffected.objects.map((line) => line.pk),
     reason: 'Review reinspection and customer contact for potentially affected shipments; product defects are not confirmed',
   }
   log('Selected customer and evidence:', request)
   log('Tasks before execution:', rt.search('ContactTask', { actor }).objects.length)
+  log('The selection is unsaved. Execution rechecks the anomaly, window, customer and shipped-line evidence against current records.')
   log('Create task:', rt.execute('createContactTask', request, { actor }))
   log('Task creation sends no message and does not try to hold already shipped products.')
 
-  h('5. Re-index: the task and its evidence links survive')
-  rt.load(integrate(app.sources))
+  h('5. Read: inspect the saved task and all its evidence links')
   const task = rt.get('ContactTask', 'CONTACT-C1', { actor })!
-  const savedLines = rt.traverse(task, 'contactLines', { actor })
-  trace('Traverse contactLines (forward): ContactTask → ShipmentLine', { task }, savedLines)
-  log('Saved evidence after source refresh:', savedLines)
+  log('Saved contact task:', task)
+  for (const link of ['customerContacts', 'contactEquipment', 'contactLots', 'contactLines']) {
+    trace(`Traverse ${link}: task → saved evidence`, { task }, rt.traverse(task, link, { actor }))
+  }
+  log('Next task: use these records to prepare customer contact and review reinspection needs.')
 
   h('6. Audit log (applied AND rejected attempts)')
   for (const e of rt.auditLog()) {

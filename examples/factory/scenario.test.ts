@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { buildMcpServer } from '../../src/mcp.js'
+import { objectSet, type ObjectSet } from '../../src/core.js'
 import { integrate } from './integrate.js'
 import { createFactory } from './runtime.js'
 
@@ -30,6 +31,7 @@ test('factory investigates a supplied manufacturing window and records shipped-l
   const shipments = rt.filter(rt.pivot(affected, 'shipmentLines', { actor }), (object) => object.properties.status === 'shipped')
   const lines = rt.intersect(affected, rt.pivot(shipments, 'shipmentLines', { actor }))
   assert.deepEqual(ids(lines.objects), ['SL1', 'SL3', 'SL4'])
+  assert.equal(lines.objects.reduce((sum, line) => sum + (line.properties.units as number), 0), 50)
   assert.deepEqual(ids(shipments.objects), ['S1', 'S2'])
   assert.equal(shipments.objects.every((s) => s.properties.status === 'shipped'), true)
   assert.deepEqual(ids(rt.pivot(shipments, 'customerShipments', { actor }).objects), ['C1'])
@@ -52,18 +54,14 @@ test('factory investigates a supplied manufacturing window and records shipped-l
   assert.equal(rt.auditLog({ status: 'applied' }).length, 1)
 })
 
-test('factory impact counts affected line quantities once across converging paths', (t) => {
+test('factory exploration deduplicates converging production paths without losing shipment lines', (t) => {
   const { rt } = setup(t)
   const equipment = rt.filter(rt.search('Equipment', { actor }), (object) => ['PRESS-1', 'OVEN-1'].includes(object.properties.id as string))
   const lots = rt.pivot(equipment, 'producedOn', { actor })
   assert.deepEqual(ids(lots.objects), ['L1', 'L2', 'L3'])
-  const impact = rt.call('customerImpact', { lotIds: [...ids(lots.objects), 'L1'] }, { actor })
-  assert.deepEqual(impact.aggregation.values, [
-    { key: 'C1', pks: ['C1'], metrics: { affectedUnits: 50, shipmentCount: 2 } },
-    { key: 'C2', pks: ['C2'], metrics: { affectedUnits: 15, shipmentCount: 1 } },
-  ])
-  assert.deepEqual(ids(impact.evidence[0].lines.objects), ['SL1', 'SL3', 'SL4'])
-  assert.deepEqual(rt.call('customerImpact', { lotIds: [] }, { actor }).aggregation.set, { type: 'Customer', objects: [] })
+  const lines = rt.pivot(lots, 'lotLines', { actor })
+  assert.deepEqual(ids(lines.objects), ['SL1', 'SL3', 'SL5', 'SL2', 'SL4'])
+  assert.equal(lines.objects.reduce((sum, line) => sum + (line.properties.units as number), 0), 75)
   assert.deepEqual(rt.auditLog(), [])
 })
 
@@ -72,25 +70,22 @@ for (const status of ['pending', 'held']) {
     const { rt, sources } = setup(t)
     sources.wms.prepare('UPDATE shipment SET status = ?, shipped_at = NULL WHERE id = ?').run(status, 'S2')
     rt.load(integrate(sources))
-    const impact = rt.call('customerImpact', { lotIds: ['L1', 'L3'] }, { actor })
-    assert.deepEqual(impact.aggregation.values, [
-      { key: 'C1', pks: ['C1'], metrics: { affectedUnits: 10, shipmentCount: 1 } },
-    ])
-    assert.deepEqual(ids(impact.evidence[0].lines.objects), ['SL1'], 'exclude unshipped lines and unrelated L4 packed in S1')
+    const lots = objectSet('Lot', ['L1', 'L3'].map((id) => rt.get('Lot', id, { actor })!))
+    const affected = rt.pivot(lots, 'lotLines', { actor })
+    const shipments = rt.filter(rt.pivot(affected, 'shipmentLines', { actor }), (object) => object.properties.status === 'shipped')
+    const evidence = rt.intersect(affected, rt.pivot(shipments, 'shipmentLines', { actor }))
+    assert.deepEqual(ids(evidence.objects), ['SL1'], 'exclude unshipped lines and unrelated L4 packed in S1')
+    assert.equal(evidence.objects[0].properties.units, 10)
     const request = {
       customerId: 'C1', equipmentId: 'PRESS-1', taskId: 'CONTACT', reason: 'Review affected shipped products',
       after: '2026-09-06T00:00:00+09:00', before: '2026-09-07T00:00:00+09:00',
-      lineIds: ids(impact.evidence[0].lines.objects),
+      lineIds: ids(evidence.objects),
     }
     assert.equal(rt.execute('createContactTask', request, { actor }).ok, true)
     assert.deepEqual(ids(rt.traverse(rt.get('ContactTask', 'CONTACT', { actor })!, 'contactLines', { actor }).objects), ['SL1'])
 
     sources.wms.prepare('UPDATE shipment SET status = ?, shipped_at = NULL WHERE id = ?').run(status, 'S1')
     rt.load(integrate(sources))
-    const none = rt.call('customerImpact', { lotIds: ['L1', 'L3'] }, { actor })
-    assert.deepEqual(none.aggregation.set, { type: 'Customer', objects: [] })
-    assert.deepEqual(none.aggregation.values, [])
-    assert.deepEqual(none.evidence, [])
     const stale = rt.execute('createContactTask', { ...request, taskId: 'STALE' }, { actor })
     assert.equal(stale.ok, false)
     if (!stale.ok) assert.equal(stale.error.code, 'INVALID_EVIDENCE')
@@ -98,36 +93,44 @@ for (const status of ['pending', 'held']) {
   })
 }
 
-test('MCP clients filter customer-impact metrics locally and record the returned evidence', async (t) => {
+test('MCP clients discover factory evidence through client filters, pivots and intersection before recording it', async (t) => {
   const app = setup(t)
   const server = buildMcpServer(app.rt, { agent: 'investigator' })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   const client = new Client({ name: 'factory-test', version: '0.0.0' })
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
   t.after(async () => { await client.close(); await server.close() })
-  const tool = (await client.listTools()).tools.find((tool) => tool.name === 'customer_impact')!
-  assert.equal(tool.annotations?.readOnlyHint, true)
-  assert.deepEqual(tool.inputSchema.required, ['lotIds'])
-  const readJson = (result: Awaited<ReturnType<typeof client.callTool>>) => {
+  async function call<T>(name: string, args: Record<string, unknown>): Promise<T> {
+    const result = await client.callTool({ name, arguments: args })
     assert.notEqual(result.isError, true)
     assert.ok(Array.isArray(result.content))
     const block = result.content[0]
     assert.equal(block.type, 'text')
-    return JSON.parse(block.text as string)
+    return JSON.parse(block.text as string) as T
   }
-  const impact = readJson(await client.callTool({ name: 'customer_impact', arguments: { lotIds: ['L1', 'L3'] } })) as
-    ReturnType<typeof app.rt.ontology.functions.customerImpact.run>
-  assert.deepEqual(impact.aggregation.values, [{ key: 'C1', pks: ['C1'], metrics: { affectedUnits: 50, shipmentCount: 2 } }])
-  // This code runs in the client; only the resulting IDs return to the server.
-  const selectedIds = impact.aggregation.values.filter((row) => row.metrics.affectedUnits >= 40).flatMap((row) => row.pks)
-  assert.deepEqual(selectedIds, ['C1'])
+  const window = { after: '2026-09-06T00:00:00+09:00', before: '2026-09-07T00:00:00+09:00' }
+  const allEquipment = await call<ObjectSet>('search_equipment', {})
+  // These predicates run in the client; selected IDs return to the server.
+  const equipment = allEquipment.objects.filter((object) => object.properties.inspection === 'anomaly')
+  const produced = await call<ObjectSet>('pivot_produced_on', { source: { type: 'Equipment', pks: ids(equipment) } })
+  const lots = produced.objects.filter((object) => {
+    const time = Date.parse(object.properties.manufacturedAt as string)
+    return time >= Date.parse(window.after) && time < Date.parse(window.before)
+  })
+  const lines = await call<ObjectSet>('pivot_lot_lines', { source: { type: 'Lot', pks: ids(lots) } })
+  const allShipments = await call<ObjectSet>('pivot_shipment_lines', { source: { type: 'ShipmentLine', pks: ids(lines.objects) } })
+  const shipments = allShipments.objects.filter((object) => object.properties.status === 'shipped')
+  const customers = await call<ObjectSet>('pivot_customer_shipments', { source: { type: 'Shipment', pks: ids(shipments) } })
+  assert.deepEqual(ids(customers.objects), ['C1'])
+  const packed = await call<ObjectSet>('pivot_shipment_lines', { source: { type: 'Shipment', pks: ids(shipments) } })
+  const evidence = await call<ObjectSet>('intersect_shipment_line', { left: ids(lines.objects), right: ids(packed.objects) })
+  assert.deepEqual(ids(evidence.objects), ['SL1', 'SL3', 'SL4'])
+  assert.equal(evidence.objects.reduce((sum, line) => sum + (line.properties.units as number), 0), 50)
   assert.deepEqual(app.rt.auditLog(), [])
-  const evidence = impact.evidence.find((e) => e.customerId === selectedIds[0])!
-  readJson(await client.callTool({ name: 'create_contact_task', arguments: {
-    customerId: evidence.customerId, equipmentId: 'PRESS-1', taskId: 'MCP-CONTACT',
-    after: '2026-09-06T00:00:00+09:00', before: '2026-09-07T00:00:00+09:00',
-    lineIds: ids(evidence.lines.objects), reason: 'Review contact and reinspection',
-  } }))
+  await call('create_contact_task', {
+    customerId: customers.objects[0].pk, equipmentId: equipment[0].pk, taskId: 'MCP-CONTACT', ...window,
+    lineIds: ids(evidence.objects), reason: 'Review contact and reinspection',
+  })
   const task = app.rt.get('ContactTask', 'MCP-CONTACT', { actor })!
   assert.deepEqual(ids(app.rt.traverse(task, 'contactLines', { actor }).objects), ['SL1', 'SL3', 'SL4'])
   assert.deepEqual(app.rt.auditLog().map((entry) => [entry.status, entry.actor]), [['applied', 'agent:investigator']])

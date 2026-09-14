@@ -1,6 +1,6 @@
 <svg xml:lang="ja" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1230" role="img" aria-labelledby="title desc">
   <title id="title">工場：出荷先を辿り、対応を記録する</title>
-  <desc id="desc">工場の全6オブジェクト型と全8リンク型。グレーはソース由来、オレンジはオントロジーが所有する状態。customerImpact が出荷済み明細の根拠を集計し、createContactTask が根拠を再検査して ContactTask と顧客・設備・ロット・明細へのリンクを作る。属性は抜粋。</desc>
+  <desc id="desc">工場の全6オブジェクト型と全8リンク型。グレーはソース由来、オレンジはオントロジーが所有する状態。filter・pivot で顧客を探し、積集合で残した出荷明細の数量を合計する。createContactTask が同じ根拠を再検査し、ContactTask と顧客・設備・ロット・明細へのリンクを作る。属性は抜粋。</desc>
   <!-- Edit this SVG, then export its PNG at 2x with:
        rsvg-convert -w 2400 -o ontology-overview.ja.png ontology-overview.ja.svg -->
   <defs>
@@ -10,7 +10,7 @@
   </defs>
   <rect x="0" y="0" width="1200" height="1230" rx="0" fill="#FFFFFF"/>
   <text x="54" y="65" text-anchor="start" font-size="29" font-weight="760" fill="#20242A">工場：出荷先を辿り、対応を記録する</text>
-  <text x="54" y="101" text-anchor="start" font-size="19" font-weight="500" fill="#747B84">オブジェクト型 6 · リンク型 8 · Function 1 · Action 1</text>
+  <text x="54" y="101" text-anchor="start" font-size="19" font-weight="500" fill="#747B84">オブジェクト型 6 · リンク型 8 · Action 1</text>
   <rect x="54" y="140" width="1092" height="630" rx="30" fill="#FFFFFF" stroke="#20242A" stroke-width="3"/>
   <text x="84" y="183" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">オブジェクト型とリンク</text>
   <text x="1116" y="183" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">主な属性を抜粋 · 主キー：id</text>
@@ -98,20 +98,20 @@
   <text x="655" y="725" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">矢印は定義上の from → to。</text>
   <text x="84" y="751" text-anchor="start" font-size="16" font-weight="500" fill="#747B84">1:N = 1対多 · M:N = 多対多</text>
   <text x="655" y="751" text-anchor="start" font-size="16" font-weight="500" fill="#747B84">リンクはどちらの端からも pivot できます。</text>
-  <text x="54" y="812" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">モデルに定義した操作</text>
+  <text x="54" y="812" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">探索と Action</text>
   <rect x="54" y="835" width="530" height="314" rx="24" fill="#F8F9FA" stroke="#5B626B" stroke-width="2.5"/>
   <rect x="610" y="835" width="536" height="314" rx="24" fill="#FFF1DE" stroke="#C96A00" stroke-width="2.5"/>
-  <text x="80" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#5B626B" letter-spacing="1">Function · 読み取り専用</text>
+  <text x="80" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#5B626B" letter-spacing="1">デモ · 根拠を探索する</text>
   <path d="M 644 853 L 656 866 L 644 879 L 632 866 Z" fill="#FFFFFF" stroke="#C96A00" stroke-width="2"/>
   <text x="670" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#C96A00" letter-spacing="1">Action · ルール検査と監査</text>
-  <g data-function="customerImpact">
-  <text x="80" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">customerImpact</text>
-  <text x="80" y="950" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">lotIds → Customer の集計と根拠</text>
-  <text x="80" y="984" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">指標：affectedUnits · shipmentCount</text>
-  <text x="80" y="1018" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">根拠：出荷済みの ShipmentLine 集合</text>
+  <g data-exploration="shipped-line-evidence">
+  <text x="80" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Filter → Pivot → 積集合 → 合計</text>
+  <text x="80" y="950" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">設備からロット・明細・出荷を辿り、顧客へ。</text>
+  <text x="80" y="984" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">対象ロットの明細 ∩ 出荷済みの全明細</text>
+  <text x="80" y="1018" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">SL1・SL3・SL4：10 + 20 + 20 = 50単位</text>
   </g>
   <text x="80" y="1082" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">未出荷・対象外の明細を除外する。</text>
-  <text x="80" y="1122" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">数量は出荷明細の粒度で計算する。</text>
+  <text x="80" y="1122" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">同じ根拠明細のIDを Action に渡す。</text>
   <g data-action="createContactTask">
   <text x="636" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">createContactTask</text>
   <text x="636" y="954" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">顧客 + 設備 + 製造期間 + 出荷明細ID</text>
@@ -120,6 +120,6 @@
   <text x="636" y="1056" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">選んだロットと明細を根拠として保持する。</text>
   <text x="636" y="1122" text-anchor="start" font-size="17" font-weight="650" fill="#C96A00">タスクを記録。メッセージは送信しない。</text>
   </g>
-  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">探索 → 根拠を確認 → 顧客を選択 → Action を実行</text>
+  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">顧客を見つける → 根拠を絞って合計する → 連絡タスクを記録する</text>
   <text x="1146" y="1214" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Operational Ontology · 工場の例</text>
 </svg>

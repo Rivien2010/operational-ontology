@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import {
-  aggregationResult, create, defineAction, defineFunction, defineLink, defineObject, defineOntology, link, objectSet, reject,
+  create, defineAction, defineLink, defineObject, defineOntology, link, objectSet, reject,
   type Runtime,
 } from '../../src/core.js'
 
@@ -95,37 +95,6 @@ export function createFactoryOntology(read: () => FactoryRead) {
             ...lots.objects.map((lot) => link('contactLots', params.taskId, lot.pk)),
             ...params.lineIds.map((id) => link('contactLines', params.taskId, id)),
           ]
-        },
-      }),
-    },
-    functions: {
-      customerImpact: defineFunction({
-        description: 'Summarize shipped quantities of the selected lots by customer, retaining only their shipped-line evidence.',
-        params: { lotIds: z.array(z.string()) },
-        run: ({ params, actor }) => {
-          const lots = objectSet('Lot', params.lotIds.map((id) => {
-            const lot = read().get('Lot', id, { actor })
-            if (!lot) throw new Error(`Lot ${id} is missing or hidden`)
-            return lot
-          }))
-          const affected = read().pivot(lots, 'lotLines', { actor })
-          const shipments = read().filter(read().pivot(affected, 'shipmentLines', { actor }), (object) => object.properties.status === 'shipped')
-          // Returning through shipments also reaches unaffected lots packed with
-          // them. Intersect with the original lines to keep the evidence scoped.
-          const lines = read().intersect(affected, read().pivot(shipments, 'shipmentLines', { actor }))
-          const customers = read().pivot(shipments, 'customerShipments', { actor })
-          const evidence = customers.objects.map((customer) => {
-            const customerLines = read().pivot(read().traverse(customer, 'customerShipments', { actor }), 'shipmentLines', { actor })
-            return { customerId: customer.pk, lines: read().intersect(lines, customerLines) }
-          })
-          const aggregation = aggregationResult(customers, evidence.map((row) => ({
-            key: row.customerId, pks: [row.customerId],
-            metrics: {
-              affectedUnits: row.lines.objects.reduce((sum, line) => sum + (line.properties.units as number), 0),
-              shipmentCount: read().pivot(row.lines, 'shipmentLines', { actor }).objects.length,
-            },
-          })))
-          return { aggregation, evidence }
         },
       }),
     },

@@ -1,5 +1,4 @@
 /** Run: pnpm demo:finance. Integer amounts are yen. */
-import { integrate } from './integrate.js'
 import { createFinance } from './runtime.js'
 import { heading as h, log, showObjects, trace } from '../demo-output.js'
 
@@ -33,55 +32,73 @@ try {
 
   h('3. Transform: compare recipient sets by identity')
   const [fromA, fromB, fromC] = paths.map((path) => path.recipients)
-  const eitherAB = rt.union(fromA, fromB)
-  trace('Union A ∪ B: recipients reached from either origin', { A: fromA, B: fromB }, eitherAB)
-  const anyRecipient = rt.union(eitherAB, fromC)
-  trace('Union (A ∪ B) ∪ C: all recipients reached in this scope', { 'A ∪ B': eitherAB, C: fromC }, anyRecipient)
   const sharedAB = rt.intersect(fromA, fromB)
   trace('Intersect A ∩ B: recipients shared by A and B', { A: fromA, B: fromB }, sharedAB)
   const common = rt.intersect(sharedAB, fromC)
   trace('Intersect (A ∩ B) ∩ C: recipients shared by all three', { 'A ∩ B': sharedAB, C: fromC }, common)
-  const notCommon = rt.subtract(anyRecipient, common)
-  trace('Subtract: all recipients − recipients shared by all three', { all: anyRecipient, shared: common }, notCommon)
-  log('W survives A ∩ B but drops out when intersecting with C. Y, W and Z remain in the difference set.')
+  log('W survives A ∩ B but drops out when intersecting with C. The common recipient is X.')
   log('These operations compare Account IDs. They do not add amounts or count transfers.')
 
-  h('4. Transform: compare sender counts, amounts and evidence')
+  h('4. Read / Transform: return from X to the evidence transfers')
+  const account = common.objects[0]
+  const incoming = rt.pivot(common, 'incoming', { actor })
+  trace('Pivot incoming (forward): common recipient → all incoming transfers', { common }, incoming)
+  const [aTransfers, bTransfers, cTransfers] = paths.map((path) => path.transfers)
+  const abTransfers = rt.union(aTransfers, bTransfers)
+  trace('Union: scoped transfers from A ∪ B', { A: aTransfers, B: bTransfers }, abTransfers)
+  const scopedTransfers = rt.union(abTransfers, cTransfers)
+  trace('Union: scoped transfers from (A ∪ B) ∪ C', { 'A ∪ B': abTransfers, C: cTransfers }, scopedTransfers)
+  const evidence = rt.intersect(incoming, scopedTransfers)
+  trace('Intersect: incoming to X ∩ transfers in the origin/time scope', { incoming, scopedTransfers }, evidence)
+  log('T8 is on the previous day, T10 is in the morning, and T9 comes from D. They are outside this investigation scope.')
+  console.table(evidence.objects.map(({ pk, properties }) => ({ transfer: pk, occurredAt: properties.occurredAt, yen: properties.amount })))
+  const senders = rt.pivot(evidence, 'outgoing', { actor })
+  trace('Pivot outgoing (reverse): evidence transfers → distinct senders', { evidence }, senders)
+  const totalAmount = evidence.objects.reduce((sum, transfer) => sum + (transfer.properties.amount as number), 0)
+  log('Aggregate the retained evidence:', { transfers: evidence.objects.length, senders: senders.objects.length, yen: totalAmount })
+  log('Four transfers from three senders: A sends twice. Sum the transfer records, retaining both payments from A.')
+
+  h('5. Function: compare metrics across recipients')
   log('Function recipientSummary counts distinct senders and sums the retained evidence transfers for each recipient.')
   log('    params:', scope)
   const summary = rt.call('recipientSummary', scope, { actor })
   showObjects('recipient accounts', summary.aggregation.set)
   console.table(summary.aggregation.values.map(({ key, pks, metrics }) => ({ group: key, accounts: pks.join(', '), ...metrics })))
+  console.table(summary.evidence.map((row) => ({
+    recipient: row.accountId, transfers: row.transfers.objects.map((t) => t.pk).join(', '), senders: row.senders.objects.map((s) => s.pk).join(', '),
+  })))
+  log('senderCount is computed from distinct senders in this scope; it is not a property stored on Account.')
   const selected = rt.filter(summary.aggregation, (row) => row.metrics.senderCount >= 2)
   trace('Filter aggregate rows: senderCount >= 2, retaining their accounts', { before: summary.aggregation.set }, selected.set)
   console.table(selected.values.map(({ key, pks, metrics }) => ({ group: key, accounts: pks.join(', '), ...metrics })))
   log('X and W meet the two-sender threshold. Choose X for this case because it is shared by all three origins.')
   log('X has four transfers from three senders, totalling 5,100,000 yen.')
-  const account = common.objects[0]
-  const evidence = summary.evidence.find((e) => e.accountId === account.pk)!
   log('Context to verify:', account.properties.context)
-  showObjects('evidence transfers for X', evidence.transfers)
-  showObjects('distinct senders for X', evidence.senders)
-  console.table(evidence.transfers.objects.map(({ pk, properties }) => ({ transfer: pk, occurredAt: properties.occurredAt, yen: properties.amount })))
+  log('A shared payment provider could explain these transfers. Check their invoices and payment purposes.')
 
-  h('5. Write: record a case for checking the payments')
+  h('6. Write: record a case for checking the payments')
+  // Keep the original scope and evidence found by the explicit exploration.
   const request = {
-    ...summary.scope, accountId: account.pk, investigationId: 'CASE-X',
-    transferIds: evidence.transfers.objects.map((t) => t.pk),
+    ...scope, accountId: account.pk, investigationId: 'CASE-X',
+    transferIds: evidence.objects.map((t) => t.pk),
     reason: 'Request invoices and payment purposes for the common recipient; a legitimate explanation remains possible',
   }
   log('Selected account, scope and evidence:', request)
+  log('Cases before execution:', rt.search('Investigation', { actor }).objects.length)
+  log('The selection is unsaved. Execution rechecks each transfer against the current origin, timestamp and recipient links.')
   log('Create case:', rt.execute('openInvestigation', request, { actor }))
   log('No account was frozen. Temporal sequence does not identify the same funds uniquely.')
 
-  h('6. Re-index: the case and its evidence links survive')
-  rt.load(integrate(app.sources))
+  h('7. Read: inspect the case and its eight evidence links')
   const saved = rt.get('Investigation', 'CASE-X', { actor })!
-  const savedTransfers = rt.traverse(saved, 'investigationTransfers', { actor })
-  trace('Traverse investigationTransfers (forward): Investigation → Transfer', { investigation: saved }, savedTransfers)
-  log('Evidence after source refresh:', savedTransfers)
+  log('Saved investigation:', saved)
+  for (const link of ['accountInvestigations', 'investigationOrigins', 'investigationTransfers']) {
+    trace(`Traverse ${link}: case → saved evidence`, { investigation: saved }, rt.traverse(saved, link, { actor }))
+  }
+  log('Next task: request the invoices and payment purposes for two transfers from A, one from B and one from C.')
+  log('Document requests and review of the replies are outside this demo.')
 
-  h('7. Audit log (applied AND rejected attempts)')
+  h('8. Audit log (applied AND rejected attempts)')
   for (const e of rt.auditLog()) {
     log(`  #${e.seq} ${e.status.padEnd(8)} ${e.action}(${e.target}) by ${e.actor}${e.error ? ` — ${e.error.code}` : ''}`)
   }

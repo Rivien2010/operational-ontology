@@ -41,7 +41,7 @@ const nurses = rt.call('nurseSearch', { patientId: 'P1', bedId: bed.pk }, { acto
 
 ## 範囲とコード
 
-[`demo.ts`](./demo.ts) から読み、[`ontology.ts`](./ontology.ts) でルールを確認できます。`fixtures.ts`・`integrate.ts` がソースの事実を表し、`runtime.ts` が型付きの読み取りをモデルへ接続します。Action のコンテキストにメソッドは増やしません。
+[`demo.ts`](./demo.ts) から読み、[`ontology.ts`](./ontology.ts) でルールを確認できます。`fixtures.ts`・`integrate.ts` がソースの事実を表します。`runtime.ts` はモデルに getter を渡し、ランタイムの構築後にルールと Function が型付きの読み取りを使えるようにします。
 
 9月8日の日勤という固定の計画範囲を扱い、単一の書き込み元と、関係する全資源の可視性を前提とします。複数患者の最適配分、時間帯の重なり、計画の取り消し、源泉の入院情報への書き戻し、源泉が計画を受理した後の照合は扱いません。再検査の対象は現在のインデックスであり、病院システムへの都度照会ではありません。実際の入院処理は別途ソース側で行う業務です。
 

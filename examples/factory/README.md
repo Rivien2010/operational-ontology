@@ -35,7 +35,7 @@ The operator previews and runs `createContactTask`. The Action checks the equipm
 
 ## Code and MCP
 
-Start with [`demo.ts`](./demo.ts), then the rules and Functions in [`ontology.ts`](./ontology.ts). `fixtures.ts` and `integrate.ts` supply existing source facts, `runtime.ts` wires model reads to the runtime. Source write-back is covered in [orders](../orders/ontology.ts), candidates and allocation in [hospital](../hospital/README.md), and shared recipients in [finance](../finance/README.md). No separate array-based set helpers are needed.
+Start with [`demo.ts`](./demo.ts), then the rules and Functions in [`ontology.ts`](./ontology.ts). `fixtures.ts` and `integrate.ts` supply existing source facts, `runtime.ts` wires model reads to the runtime. Source write-back is covered in [orders](../orders/ontology.ts), candidates and allocation in [hospital](../hospital/README.md), and shared recipients in [finance](../finance/README.md).
 
 Run `pnpm mcp:factory`, or connect from the repository root with:
 

@@ -35,7 +35,7 @@ C1 は対象ロットの出荷先なので見つかります。C2 の L2 は9月
 
 ## コードと MCP
 
-[`demo.ts`](./demo.ts) から読み、ルールと Function は [`ontology.ts`](./ontology.ts) で確認できます。`fixtures.ts`・`integrate.ts` が既存のソースの事実を供給し、`runtime.ts` がモデルの読み取りとランタイムを接続します。ソースへの書き戻しは [orders](../orders/ontology.ts)、候補と割当は [hospital](../hospital/README.ja.md)、共通項の調査は [finance](../finance/README.ja.md) で扱います。配列用の独自の集合 helper は不要です。
+[`demo.ts`](./demo.ts) から読み、ルールと Function は [`ontology.ts`](./ontology.ts) で確認できます。`fixtures.ts`・`integrate.ts` が既存のソースの事実を供給し、`runtime.ts` がモデルの読み取りとランタイムを接続します。ソースへの書き戻しは [orders](../orders/ontology.ts)、候補と割当は [hospital](../hospital/README.ja.md)、共通項の調査は [finance](../finance/README.ja.md) で扱います。
 
 `pnpm mcp:factory` で起動します。リポジトリのルートからは次でも接続できます。
 

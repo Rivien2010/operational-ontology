@@ -41,7 +41,7 @@ The source patient remains `waiting`, the bed remains source-ready, and N1's sou
 
 ## Scope and code
 
-Start with [`demo.ts`](./demo.ts), then [`ontology.ts`](./ontology.ts). `fixtures.ts` and `integrate.ts` model source facts; `runtime.ts` connects the model's typed reads without adding methods to Action contexts.
+Start with [`demo.ts`](./demo.ts), then [`ontology.ts`](./ontology.ts). `fixtures.ts` and `integrate.ts` model source facts. `runtime.ts` passes a getter to the model so rules and Functions can use its typed reads after runtime construction.
 
 This is one fixed September 8 day-shift planning window, with one writer and all relevant resources visible. There is no multi-patient optimizer, schedule overlap calculation, plan cancellation, source admission write-back or reconciliation after a source accepts a plan. Revalidation uses the currently indexed snapshot, not a live hospital query. Real admission remains a separate source-system workflow.
 

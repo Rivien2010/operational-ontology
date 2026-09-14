@@ -33,11 +33,11 @@ const customers = rt.traverse(orders.objects[0], 'customerOrders', hq) // Object
 console.log(orders.objects[0].properties.status)
 ```
 
-This branch simplifies TypeScript contracts to make the implementation easier to read. Input names are strings, operation params and edit properties are plain records, and filters are TypeScript predicates. The runtime checks model-specific names, values and relationships. The editor does not guide callers from an object to its links, directions or valid conditions.
+Input names are strings, and operation params and edit properties are plain records. The runtime checks model-specific names, values and relationships.
 
-Basic data shapes, readonly identities and model-author callback types remain. A small result lookup also remains: a literal name in `get`, `search` or `call` determines its result type. Keep the inferred model definition for this lookup; an explicit `OntologyDef` annotation erases its specific schemas. A dynamic object name returns common instances with `unknown` property values; a dynamic Function name returns `unknown`. `traverse`, `pivot` and set algebra return the common `ObjectSet` shape. Business code that needs concrete properties after traversal must narrow or assert their types; an assertion does not validate a value.
+A literal name in `get`, `search` or `call` determines its result type. Keep the inferred model definition; an explicit `OntologyDef` annotation erases its specific schemas. A dynamic object name returns common instances with `unknown` property values; a dynamic Function name returns `unknown`. `traverse`, `pivot` and set algebra return the common `ObjectSet` shape. Code that needs concrete properties after traversal must narrow or assert their types; an assertion does not validate a value.
 
-`traverse(source, linkName, { actor, direction? })` accepts a full instance, with no primary-key-only or reference-only overload. The link definition determines direction.
+`traverse(source, linkName, { actor, direction? })` accepts a full instance. The link definition determines direction.
 
 `direction` is optional in the TypeScript interface. The runtime checks whether it can be omitted and rejects an impossible direction or a missing choice for a same-type link:
 
@@ -48,13 +48,11 @@ Basic data shapes, readonly identities and model-author callback types remain. A
 | Both ends | `forward` or `reverse`, required | The same object type |
 | Neither end | Invalid link for this source | — |
 
-For an `Employee → Employee` link defined from manager to subordinate, `forward` gets subordinates and `reverse` gets managers. Only the existing link name is needed; there are no directional aliases.
+For an `Employee → Employee` link defined from manager to subordinate, `forward` gets subordinates and `reverse` gets managers.
 
 The rule depends on the declared types, not the stored edges. Traversal always returns a set, including for one-to-many reverse traversal; its `type` tag records the destination. Traversal re-reads `(type, pk)` under the caller's actor and checks visibility at both ends. Supplied properties are ignored for these checks. Missing or hidden sources yield an empty set retaining the destination type. Invalid source shape, link or direction throws.
 
 `pivot(set, linkName, { actor, direction? })` applies the same rules to each origin and deduplicates the destinations. It validates the link and direction even when the input set is empty. Returning to a previously visited type retrieves the related instances, not the original or complete set of that type.
-
-MCP reads serialize the same shape. Traversal tools take `{ source: { type, pk, properties }, direction? }`, with direction required in the schema for same-type links. These generated schemas still expose model-specific choices to agents independently of TypeScript's simpler interfaces. Stored rows and audit edit payloads keep their existing format.
 
 ## Object sets, filters and aggregation
 
@@ -71,16 +69,9 @@ const both = rt.intersect(pending, large)   // AND between sets
 const remaining = rt.subtract(orders, both)
 ```
 
-`filter` accepts only a synchronous TypeScript predicate; `search` accepts the same callback in its optional `filter` option. Equality objects, structured clause arrays and code strings are not supported. Predicates must not cause side effects; exceptions propagate without an action audit. The runtime checks the collection shape, while the callback controls comparisons, case sensitivity, OR/NOT, and null or missing values. It does not validate a callback's logic against property schemas or enforce purity.
+`filter` accepts a synchronous TypeScript predicate; `search` accepts the same callback in its optional `filter` option. Predicates must not cause side effects; exceptions propagate without an action audit. The runtime checks the collection shape, while the callback controls comparisons, case sensitivity, OR/NOT, and null or missing values. It does not validate a callback's logic against property schemas or enforce purity.
 
-For dates, the examples compare `Date.parse(...)` values so different UTC offsets compare as instants. Dates remain strings in stored properties. For example:
-
-```ts
-const lots = rt.filter(produced, (lot) => {
-  const time = Date.parse(lot.properties.manufacturedAt as string)
-  return time >= Date.parse(window.after) && time < Date.parse(window.before)
-})
-```
+For dates, the examples compare `Date.parse(...)` values so different UTC offsets compare as instants. Dates remain strings in stored properties.
 
 `aggregate(set, { groupBy, sum? })` groups by one scalar property, always computes `count`, and optionally sums one numeric property. Its result has two parts:
 
@@ -94,11 +85,11 @@ console.log(selected.values) // Selected rows, with their original metrics
 const targets = selected.set // Order objects belonging to those rows
 ```
 
-There is no separate `having` method. Filtering an aggregation applies the predicate to its rows and retains the union of their corresponding objects; it does not recompute metrics. To filter object properties, use `.set`, then aggregate again explicitly if needed. Filtering to zero rows keeps an empty tagged set and an empty `values` array. Grouping by a property does not pivot to the type that property might refer to.
+Filtering an aggregation applies the predicate to its rows and retains the union of their corresponding objects; it does not recompute metrics. To filter object properties, use `.set`, then aggregate again explicitly if needed. Filtering to zero rows keeps an empty tagged set and an empty `values` array. Grouping by a property does not pivot to the type that property might refer to.
 
-Model Functions can return the same `AggregationResult<O>` shape for domain summaries. For example, finance returns recipient **accounts** with `senderCount`, `transactionCount` and `totalAmount`, computed from **transfers**. `aggregationResult(set, values)` validates finite numeric metrics, unique group keys and member references, and forms the corresponding set. `metrics` is a `Readonly<Record<string, number>>`, with no column declaration. Names are arbitrary: typos and consistent columns across rows are not checked. Producers keep their metric names consistent; reading an absent metric yields `undefined` at runtime. Empty results carry no column list.
+Model Functions can return the same `AggregationResult<O>` shape for link-based or custom metrics. For example, finance returns recipient **accounts** with `senderCount`, `transactionCount` and `totalAmount`, computed from **transfers**. `aggregationResult(set, values)` validates finite numeric metrics, unique group keys and member references, and forms the corresponding set. `metrics` is a `Readonly<Record<string, number>>`. Producers keep metric names consistent; typos and missing columns are not checked, and reading an absent metric yields `undefined` at runtime.
 
-Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Aggregation supports optional/nullable/default wrappers around scalar properties, but grouping by a null or missing value or summing one throws. Automatic path history, recursive traversal, arbitrary transforms, joins and a general aggregation language are not implemented.
+Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Aggregation supports optional/nullable/default wrappers around scalar properties, but grouping by a null or missing value or summing one throws.
 
 ## MCP query inputs
 
@@ -112,6 +103,8 @@ The model generates `search_<type>`, `get_<type>`, `union_<type>`, `intersect_<t
 | `aggregate_<type>` | `{ pks, group_by, sum? }` |
 | `traverse_<link>` | `{ source: { type, pk, properties }, direction? }` |
 | `pivot_<link>` | `{ source: { type, pks }, direction? }` |
+
+Generated schemas expose the model's types, links and aggregation properties. For same-type links, the traversal and pivot schemas require `direction`.
 
 Object collections serialize as `{ type, objects }`. The server accepts no filter clauses, callback strings, arbitrary code or SQL. Agents filter results in their own code execution environment, then pass selected IDs to the next tool. This requires a client with code execution; the repository does not provide that environment. Objects must be transferred to the client before local filtering, which limits this approach for large sets.
 
@@ -143,9 +136,7 @@ Over MCP stdio, callers share one actor. `OO_AGENT=<name> pnpm mcp` labels it as
 
 ## Running named operations
 
-`execute(actionName, params, { actor })` applies an Action; `call(functionName, params, { actor })` invokes a Function. Both accept string names and plain params records, with inputs checked against the model schema at runtime. `execute` always returns `ActionResult`; unknown Action names are refused as `UNKNOWN_ACTION` and audited. `call` preserves the implementation's result type for literal names, including Promises, and throws for unknown Function names. Neither method dispatches to the other kind. Shared Action/Function names remain invalid to keep generated MCP tool names unambiguous.
-
-This replaces `execute()` and the separate Function `call()` entry point; neither remains as an alias. Dynamic callers that previously received an audited `UNKNOWN_ACTION` refusal from `execute()` now receive an exception for an unknown name. Refusals for known Actions remain audited.
+`execute(actionName, params, { actor })` applies an Action; `call(functionName, params, { actor })` invokes a Function. Both validate params against the model schema. `execute` returns success or refusal as `ActionResult`; unknown Action names are refused as `UNKNOWN_ACTION` and audited. `call` returns the Function's value, including a Promise for an asynchronous implementation, and throws for unknown Function names. Action and Function names must be distinct to keep generated MCP tool names unambiguous.
 
 ## Executing actions
 
@@ -154,28 +145,24 @@ An action definition must include `preconditions`, using `[]` when there are non
 `execute(actionName, params, { actor })` follows this order:
 
 1. Validate params and load the target under the actor's visibility policy.
-2. Evaluate preconditions.
+2. Evaluate preconditions in order, returning the first refusal.
 3. Run the effects function to obtain an edit plan.
 4. Dry-run the whole plan through the commit's own code, then roll it back.
 5. Check the plan against the ownership declarations.
 6. Write back a nonempty source-backed plan through the adapter.
 7. Commit the local edits and audit entry in one transaction.
 
-Effects describe changes as data and must be pure. `modify` changes properties, `create` creates an ontology-owned object, and `link` / `unlink` change relationships. The gate checks schemas, object existence, and cardinality before the adapter runs. A create-and-link action such as `addOrderNote` commits its local plan atomically. These edits change instances; model definitions are code reviewed and versioned in git.
+Effects describe changes as data and must be pure. `modify` changes properties, `create` creates an ontology-owned object, and `link` / `unlink` change relationships. The gate checks schemas, object existence, and cardinality before the adapter runs. One Action can accept array parameters and commit multiple edits atomically; separate Action calls are separate transactions and audit entries. These edits change instances; model definitions are code reviewed and versioned in git.
 
 ## Preview and model-defined functions
 
 `preview(actionName, params, { actor })` shares the execution gate through step 5 and checks that a required write-back adapter exists. It returns `{ ok: true, edits }` or the same local refusal as execution. Its dry run rolls back; it performs no write-back, commits no edits, and records no audit entry, including on refusals and exceptions. Preconditions and effects must not perform side effects. Preview does not reserve resources or ask the source to accept a write. Running the Action re-evaluates current state and the adapter may still refuse a stale source write.
 
-Models may register named reads in `functions` using `defineFunction({ description, params, run })`. For a Function name, `rt.call(name, params, { actor })` validates the parameter schema and calls `run({ params, actor })`. The model author's callback receives schema-derived params; callers supply a plain record and receive the implementation's result type when using a literal name. Functions return their values directly. Invalid params, unknown names, and implementation errors throw; calls do not enter the action audit log. MCP generates a tool from each definition, with the same input schema and session actor, and marks it with `readOnlyHint`. It awaits asynchronous results and reports caught exceptions as `INTERNAL` errors.
+Models register named reads in `functions` using `defineFunction({ description, params, run })`. `call` validates params and invokes `run({ params, actor })`; the callback receives schema-derived params. Invalid inputs and implementation errors throw; calls do not enter the action audit log. MCP generates a tool with the same input schema and session actor, marks it with `readOnlyHint`, awaits asynchronous results and reports caught exceptions as `INTERNAL` errors.
 
-For example, `rt.call('customerImpact', { lotIds: ['L1'] }, { actor })` returns a customer aggregation and its shipped-line evidence. The factory model owns the search procedure; the caller supplies the lots and uses the result. Functions can also implement domain reads without an associated Action.
+Function implementations must use the caller's actor for their reads and must not perform writes or other side effects. This is a model-author contract, like pure preconditions and effects, not an enforced sandbox. Functions can implement domain reads without an associated Action.
 
-Function implementations must use the caller's actor for their reads and must not perform writes or other side effects. This is a model-author contract, like pure preconditions and effects, not an enforced sandbox. The examples inject a getter for typed read methods in `runtime.ts`; rules and functions use those methods after runtime construction. No new read API is added to `ActionCtx`.
-
-Hospital candidate searches cannot preview the final allocation while a bed or nurse is still unspecified. Its model shares ordinary evaluation functions between `bedSearch`, `nurseSearch` and the final Action. Candidate Functions return `{ set, assessments }`, where every assessment contains an object and an array of `{ code, message }` reasons. There is no partial-preview API or new generic rule-engine interface. Action execution still returns the first refusal through the existing gate.
-
-Running several Actions creates independent attempts with separate audit entries. A single action can accept an array parameter and validate and commit its whole local plan atomically, as `createContactTask` does for its evidence lines. Separate successful previews do not reserve shared resources: hospital plans for P1 and P4 can each pass preview, but applying one consumes the bed and nurse capacity and causes the other to be refused. In the three investigation examples, customer-contact tasks, provisional allocations and investigation cases are ontology-owned objects linked to source facts. They survive re-indexing; they do not imply that a message was sent, a source admission was changed, or an account was frozen. Stored evidence links retain record identities, not immutable copies of source record contents.
+The examples show [customer impact and contact tasks](./examples/factory/README.md), [candidate evaluation and allocation](./examples/hospital/README.md), and [recipient summaries and investigation cases](./examples/finance/README.md). Each documents its Function results, shared rules and Action effects. Stored evidence links retain record identities, not immutable copies of source record contents.
 
 ## The authority line, checked
 
@@ -204,7 +191,7 @@ The declared ordering is write-back first: the adapter runs before the local com
 
 **The audit log records both failure directions.** A **`WRITEBACK_FAILED`** refusal records the full plan the adapter saw — the adapter may have partially applied it before throwing, since source-side atomicity is the adapter's contract, not this runtime's. The reverse failure is audited as **`COMMIT_FAILED`**, plan included: after a write-back-first action, those edits are what already reached the source. Both entries are raw material for reconciliation.
 
-**"Every action attempt is audited" has a stated limit.** It covers calls to known Actions admitted to the write gate and observed to completion. Reads, previews, unknown operation names, and calls refused because of a caller-opened transaction do not enter this log. If the process dies between the source update and the local commit, both the edit and its audit entry are lost. Closing that window would take a persisted pending-invocation record, which this implementation does not have.
+**"Every action attempt is audited" has a stated limit.** It covers `execute` calls admitted to the write gate and observed to completion, including unknown Action names. Reads, Function calls, previews, and calls refused because of a caller-opened transaction do not enter this log. If the process dies between the source update and the local commit, both the edit and its audit entry are lost. Closing that window would take a persisted pending-invocation record, which this implementation does not have.
 
 A crash inside the write path is audited as **`EXECUTION_CRASHED`** — a storage fault, or model code (a visibility predicate, a precondition, an effects function) that threw. The error then propagates to the caller.
 
@@ -228,13 +215,13 @@ One rule is enforced: callers cannot wrap the runtime. Running an Action and cal
 
 The rest of the boundary is declared, not defended. The runtime is an in-process library: any code that holds the database handle — the caller, a rule, the write-back adapter — can bypass the action gate with a direct `UPDATE`, and no in-process check can prevent that. The contract is therefore: rules and the adapter must not touch the ontology store. The adapter has no reason to — it receives its own copies of the edit plan and the target object, and speaks only to the systems of record.
 
-An earlier version detected one observable slice of violations — a transaction left open on the store — and v0.2 removed the detector: a check that catches one intrusion shape but misses the simplest one (a direct autocommit `UPDATE`) looks like a defense without being one. A deployment that needs an enforced boundary should put the runtime behind a process boundary, with no direct database access for consumers. The bundled MCP server is exactly that shape.
+A deployment that needs an enforced boundary should put the runtime behind a process boundary, with no direct database access for consumers. The bundled MCP server is exactly that shape.
 
 ## The storable boundary
 
 The store keeps JSON, so every stored value must survive JSON serialization and deserialization unchanged. A row containing a value that would come back changed or dropped — a class instance, a `Date`, `NaN`, a `Map`, `undefined` at any depth — is refused at every write, whether it arrives through an action or through `load()`. The same check applies to a declared default for an `owned` property (at definition time) and to action params (at the entry point; see the audit note above).
 
-One obligation is declared rather than checked: property schemas must validate, not transform. The runtime feeds stored values back through the same schema on later writes, so a transforming schema (`z.coerce.date()`, `.transform(…)`) would refuse or silently rewrite its own output on the next pass. An earlier version enforced this with a per-write fixed-point check (validate, re-validate the output, require identity); v0.2 states it as the model author's contract instead.
+Property schemas must validate without transforming values. This is the model author's responsibility. The runtime feeds stored values back through the same schema on later writes, so a transforming schema (`z.coerce.date()`, `.transform(…)`) would refuse or silently rewrite its own output on the next pass.
 
 ## Re-indexing vs edits
 
@@ -249,19 +236,6 @@ Snapshot semantics, per loaded type: replace the base, reapply the edit layer. T
 
 ## Current limits
 
-These limits describe the current implementation:
-
-- An edit plan cannot mix source-backed and ontology-owned changes; creation is limited to ontology-owned types, as shown in the [authority checks](#the-authority-line-checked).
-- There are no deletes, link properties, or composite keys. The orders demo leaves line quantities in the data layer; the factory model represents shipment lines as objects to aggregate affected quantities.
-- `modify`, `create`, `link`, and `unlink` payloads are checked at runtime; their TypeScript types are not derived from the model. Nested properties follow their Zod schemas and are not made strict by the runtime.
-- Queries use the local SQLite snapshot, with no pagination or result cap. Saved/lazy queries, automatic path history, recursive exploration, federation and runtime schema evolution are outside the implemented API. The audit log is a separate administrative view rather than an object in the graph.
-
-The API has changed since v0.3: object reads and `meta.target` use `{ type, pk, properties }`; traversal takes an instance first; actions use `defineAction(objects, definition)`; modifications use `modify(instance, changes)`. Stored rows and audit edit payloads retain their earlier format. Published versions are in the [release notes](https://github.com/gura105/operational-ontology/releases).
-
-For the set API migration: replace array access on `search` / `traverse` with `.objects`, use `pivot` for sets, and replace filter conditions with predicate callbacks. Aggregation now takes an ObjectSet and a property-based `groupBy`, with optional numeric `sum`, and returns `{ set, values }`; link-based or custom metrics belong in model Functions. The older array-return and callback-aggregation forms are not retained as overloads.
-
-For this branch's type simplification, `TraverseOptions` no longer takes model parameters, and `AggregationResult<O>` no longer takes metric names. Model-dependent name, parameter and link-navigation aliases are removed. Model-specific operation inputs are checked at runtime. Filter clauses and the `Where` type are removed: use local predicates. MCP `search_*` takes `{}`, `aggregate_*` no longer takes `where`, and `filter_*` tools are removed. Move filtering to client-side code and pass selected IDs to subsequent tools.
-
-The unified `run` method is removed: use `execute` for Actions and `call` for Functions. `preview` remains the Action planning method. The callback inside a Function definition is still named `run`. The result type alias changes from `OperationResultOf` to `FunctionResultOf`.
-
-Aggregation results no longer contain `columns`. Put each row's numeric values in `row.metrics` and construct results with `aggregationResult(set, values)`. `rt.filter` still selects metric rows and their corresponding set together.
+- Object deletion, link properties and composite keys are unsupported. Quantities or timestamps on a relationship can be represented by a separate object, as in the factory's shipment lines and finance's transfers.
+- Nested properties follow their Zod schemas and are not made strict by the runtime.
+- Queries use the local SQLite snapshot, with no pagination or result cap. Saved/lazy queries, automatic path history, recursive exploration, arbitrary transforms, joins, federation and runtime schema evolution are outside the implemented API.

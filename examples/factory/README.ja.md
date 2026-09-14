@@ -43,4 +43,4 @@ C1 は対象ロットの出荷先なので見つかります。C2 の L2 は9月
 claude --strict-mcp-config --mcp-config examples/factory/.mcp.json
 ```
 
-同じモデルから filter・pivot・集合演算・集計のツール、Function、Action を生成します。例えば `customer_impact` が集計と根拠を返し、`create_contact_task` が根拠を再検査します。契約は [IMPLEMENTATION.ja.md](../../IMPLEMENTATION.ja.md) にあります。単一の書き込み元と、判断に関係する全資源が見えることを前提とします。
+同じモデルから読み取り・pivot・集合演算・集計のツール、Function、Action を生成します。エージェントは自身のコード実行環境で取得済みオブジェクトや集計値を絞り、選んだIDを次のツールへ渡します。例えば `customer_impact` が集計と根拠を返し、`create_contact_task` が根拠を再検査します。契約は [IMPLEMENTATION.ja.md](../../IMPLEMENTATION.ja.md) にあります。単一の書き込み元と、判断に関係する全資源が見えることを前提とします。

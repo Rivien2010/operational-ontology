@@ -14,7 +14,7 @@
 | --- | --- |
 | `model.ts` | 定義用の関数、インスタンスの形、編集プラン。 |
 | `core.ts` | actor を伴う読み取り、公開クエリ API、`run` / `preview`、Action の検査経路。 |
-| `query.ts` | 取得済みの集合・集計に対する純粋な操作と、MCP と共有する構造化条件。 |
+| `query.ts` | 取得済みの集合・集計に対する純粋な操作と、呼び出し側が渡す述語の適用。 |
 | `store.ts` | SQLite の保存、インデックス、整合性検査、編集、ローカルの編集と監査の原子的コミット。 |
 | `mcp.ts` | モデルからツールを生成し、入力を同じランタイム操作へ渡す。 |
 
@@ -34,7 +34,7 @@ const customers = rt.traverse(orders.objects[0], 'customerOrders', hq) // Object
 console.log(orders.objects[0].properties.status)
 ```
 
-このブランチでは、実装を読みやすくするために TypeScript の型を簡略化しています。入力の名前は文字列、操作の params と編集する属性は普通のレコード、条件句は共通の形で受け取ります。モデル固有の名前・値・関係は実行時に検査します。オブジェクトからリンク・方向・条件へとエディタの候補で誘導する型付けは行いません。
+このブランチでは、実装を読みやすくするために TypeScript の型を簡略化しています。入力の名前は文字列、操作の params と編集する属性は普通のレコード、filter は TypeScript の述語関数で受け取ります。モデル固有の名前・値・関係は実行時に検査します。オブジェクトからリンク・方向・条件へとエディタの候補で誘導する型付けは行いません。
 
 基本的なデータ構造、readonly な同一性、モデル作者が書くコールバックの型は残します。また、`get`・`search`・`run` にリテラルで名前を指定した場合の戻り値の型は、小さな型定義で導きます。このためにモデル定義の推論された型を保ってください。`OntologyDef` と明示的に注釈すると、具体的なスキーマの型情報は失われます。動的なオブジェクト名では属性値が `unknown` の共通インスタンス、動的な操作名では `unknown` を返します。`traverse`・`pivot`・集合演算は共通の `ObjectSet` を返します。走査後の業務コードで具体的な属性型が必要な箇所では、型の絞り込みやアサーションが必要です。アサーション自体は値を検証しません。
 
@@ -65,23 +65,23 @@ MCP の読み取りも同じ形を返します。走査ツールの引数は `{ 
 
 ```ts
 const orders = rt.search('Order', { actor: 'user:hq' })
-const pending = rt.filter(orders, [{ property: 'status', op: 'eq', value: 'pending' }])
+const pending = rt.filter(orders, (order) => order.properties.status === 'pending')
 const large = rt.filter(orders, (order) => order.properties.total >= 10000)
 const either = rt.union(pending, large)       // OR
 const both = rt.intersect(pending, large)   // 集合同士の AND
 const remaining = rt.subtract(orders, both)
 ```
 
-構造化条件は `{ property, op, value }` の配列で、すべてを AND で結びます。TypeScript は条件句の形と共通の演算子一覧を検査します。モデル固有のプロパティ名・使える演算子・値は空集合に対しても実行時に検査し、生成する MCP スキーマにも反映します。`search` の任意の `filter` オプションにも同じ条件を渡せます。以前の `{ status: 'pending' }` という等値条件の省略形は残しません。コールバックは同期的な TypeScript の述語で、副作用を起こしてはいけません。MCP には送れません。
+`filter` は同期的な TypeScript の述語関数だけを受け取ります。`search` の任意の `filter` オプションも同じコールバックです。等値条件のオブジェクト、構造化条件の配列、コード文字列は受け取りません。述語は副作用を起こしてはいけません。例外はそのまま伝わり、アクションの監査には記録しません。ランタイムは集合の形を検査し、比較・大文字と小文字・OR/NOT・nullや欠損値の扱いはコールバックに任せます。コールバックのロジックを属性スキーマで検査したり、純粋性を強制したりはしません。
 
-| 属性 | 演算子 |
-| --- | --- |
-| 文字列・文字列 enum | `eq`・`ne`・`in`・`contains`。大文字と小文字を区別する。 |
-| 数値 | `eq`・`ne`・`in`・`gt`・`gte`・`lt`・`lte`。 |
-| 真偽値 | `eq`・`ne`・`in`。 |
-| ISO 日付・日時 | `eq`・`ne`・`in`・`gt`・`gte`・`lt`・`lte`。 |
+日時は、examples では `Date.parse(...)` の値を比較し、UTCオフセットが異なる表記も時点として比較します。保存された属性は文字列です。
 
-日付には `z.iso.date()`、日時には `z.iso.datetime({ offset: true })` を使うと、実行時の検査と MCP スキーマが普通の文字列と区別できます。日時はオフセットを含めた時点で比較し、日付は比較時に UTC の午前0時として扱います。保存形式は JSON 文字列です。数値への暗黙の文字列変換はしません。対応するスカラーの optional・nullable・default は認識しますが、null・欠損値の比較、それらをキーにする集計や sum は定義外として例外にし、暗黙に0にはしません。ネストした属性、配列の条件、異なる値型を混ぜたスキーマは構造化条件の対象外です。OR は和集合、NOT は明示した元集合からの差集合で表します。
+```ts
+const lots = rt.filter(produced, (lot) => {
+  const time = Date.parse(lot.properties.manufacturedAt as string)
+  return time >= Date.parse(window.after) && time < Date.parse(window.before)
+})
+```
 
 `aggregate(set, { groupBy, sum? })` は1つのスカラー属性でグループ化し、必ず `count`、任意で1つの数値属性の `sum` を求めます。結果は次の3つを持ちます。
 
@@ -91,32 +91,45 @@ const remaining = rt.subtract(orders, both)
 
 ```ts
 const grouped = rt.aggregate(pending, { groupBy: 'status', sum: 'total' })
-const selected = rt.filter(grouped, [{ property: 'sum', op: 'gte', value: 10000 }])
+const selected = rt.filter(grouped, (row) => (row.sum as number) >= 10000)
 console.log(selected.values) // 選択された行。集計値は元の値を保つ。
 const targets = selected.set // その行に属する Order の集合
 ```
 
-`having` という別メソッドは作りません。集計結果への filter は数値の集計列で行を選び、対応するオブジェクトの和集合を残します。集計値は再計算しません。属性で絞りたければ `.set` を filter し、必要なら明示的に再集計します。0行になっても空の型タグ付き集合と列定義を保持します。groupBy の属性が別の型の ID であっても、その型へ自動的に pivot はしません。
+`having` という別メソッドは作りません。集計結果への filter は述語で行を選び、対応するオブジェクトの和集合を残します。集計値は再計算しません。属性で絞りたければ `.set` を filter し、必要なら明示的に再集計します。0行になっても空の型タグ付き集合と列定義を保持します。groupBy の属性が別の型の ID であっても、その型へ自動的に pivot はしません。
 
-モデルの Function も、同じ `AggregationResult<O>` を返せます。例えば金融では、**取引**から求めた `senderCount`・`transactionCount`・`totalAmount` を、対象の**口座**集合に対応させます。`aggregationResult(set, columns, values)` は有限の数値、グループキーの一意性、メンバーの参照を検査し、対応する集合を作ります。列定義は filter と MCP の検査に使う実行時のデータです。TypeScript は行の `key` と `pks` の型を持ちますが、任意の集計列へのアクセスは `unknown` となり、コールバックでは型の絞り込みが必要です。構造化条件での集計値の指定には、オブジェクトの filter と同じ条件句を使います。行の `pks` は対象集合の ID であり、自動的に根拠レコードを意味するものではありません。根拠集合は Function の結果で集計と並べて返し、利用者が選んだ対象に対応するものを取り出します。自動的な経路履歴、再帰的な走査、任意の transform、結合、汎用的な集計言語は実装しません。
+モデルの Function も、同じ `AggregationResult<O>` を返せます。例えば金融では、**取引**から求めた `senderCount`・`transactionCount`・`totalAmount` を、対象の**口座**集合に対応させます。`aggregationResult(set, columns, values)` は有限の数値、グループキーの一意性、メンバーの参照を検査し、対応する集合を作ります。列定義は、ローカルのヘルパーが集計値を検査し、クライアントが結果を理解するための情報です。TypeScript は行の `key` と `pks` の型を持ちますが、任意の集計列へのアクセスは `unknown` となり、コールバックでは型の絞り込みが必要です。行の `pks` は対象集合の ID であり、自動的に根拠レコードを意味するものではありません。根拠集合は Function の結果で集計と並べて返し、利用者が選んだ対象に対応するものを取り出します。集計はスカラー属性の optional・nullable・default を認識しますが、null・欠損値をキーにしたり合計したりすると例外になります。自動的な経路履歴、再帰的な走査、任意の transform、結合、汎用的な集計言語は実装しません。
 
 ## MCP のクエリ入力
 
-モデルから `search_<type>`・`get_<type>`・`filter_<type>`・`union_<type>`・`intersect_<type>`・`subtract_<type>`・`aggregate_<type>` と、`traverse_<link>`・`pivot_<link>` を生成します。
+モデルから `search_<type>`・`get_<type>`・`union_<type>`・`intersect_<type>`・`subtract_<type>`・`aggregate_<type>` と、`traverse_<link>`・`pivot_<link>` を生成します。
 
 | ツール | 入力 |
 | --- | --- |
-| `search_<type>` | `{ where?: conditions }` |
+| `search_<type>` | `{}`。このセッションから見える全オブジェクト。 |
 | `get_<type>` | `{ <primaryKey>: value }` |
-| `filter_<type>` | `{ source: { pks: [...] }, where: conditions }`。集計結果を `source` に渡すこともできる。 |
 | `union/intersect/subtract_<type>` | `{ left: pks, right: pks }` |
-| `aggregate_<type>` | `{ pks, group_by, sum?, where? }` |
+| `aggregate_<type>` | `{ pks, group_by, sum? }` |
 | `traverse_<link>` | `{ source: { type, pk, properties }, direction? }` |
 | `pivot_<link>` | `{ source: { type, pks }, direction? }` |
 
-オブジェクトの集合は `{ type, objects }` で返します。主キーで受け取った入力はセッションの actor で読み直し、渡されたスナップショットを可視性の根拠にはしません。条件の定義と評価器は TypeScript と共通です。任意のコードや SQL は受け取りません。
+オブジェクトの集合は `{ type, objects }` で返します。サーバーは条件句・コールバックの文字列・任意のコード・SQLを受け取りません。エージェントは自身のコード実行環境で結果を絞り込み、選んだIDを次のツールへ渡します。コード実行に対応したクライアントが必要で、その実行環境はこのリポジトリでは提供しません。絞り込む前のオブジェクトをクライアントへ転送するため、大きな集合では転送量が制約になります。
 
-集計結果を入力すると、`filter_<type>` は数値列の宣言とメンバーの対応を検査して対象を読み直し、欠損・非表示の対象を1つでも含むグループを丸ごと除きます。渡された集計値は呼び出し元が持つ分析時点の値のままで、サーバーは再計算も由来・鮮度の保証もしません。Action は examples のように、現在の入力と根拠を独自に検査する必要があります。次の探索には集計結果の `.set` を使います。根拠などを追加した Function の外側の戻り値全体は、集計結果そのものではありません。
+MCPツールを呼び、JSONの結果を読み取る `call<T>` ヘルパーを使う場合の例です。
+
+```ts
+const orders = await call<ObjectSet>('search_order', {})
+const pks = orders.objects
+  .filter((order) => order.properties.status === 'pending')
+  .map((order) => order.pk)
+const customers = await call<ObjectSet>('pivot_customer_orders', {
+  source: { type: 'Order', pks },
+})
+```
+
+集計結果では、`.values` をローカルで filter し、選ばれた行の `pks` を重複排除します。そのIDをpivot・集合演算・集計へ渡し、集計結果全体をサーバーへ返してfilterすることはありません。集計値は分析時点のスナップショットです。各ツールはIDをセッションのactorで読み直すので、以前の結果に含まれていても、その後に非表示や欠損になったオブジェクトへのアクセスは認めません。Actionは現在の業務条件と根拠を独立して再検査します。候補の適合判定は引き続きモデルのFunctionとActionに置き、ローカルのfilterは利用者の調査上の絞り込みを表します。
+
+[金融のMCPシナリオテスト](./examples/finance/scenario.test.ts)に、`call<T>` ヘルパー、ローカルでの日付・集計値のfilter、Actionまでの実行例があります。クライアントのコードから `query.ts` の純粋な `filterObjects` / `filterAggregation` を使えば集合の形を維持できますが、返されたJSONからIDを選ぶために必須ではありません。
 
 ## 可視性と呼び出し元の identity
 
@@ -245,6 +258,6 @@ Function の実装は読み取りに呼び出し元の actor を使い、書き�
 
 v0.3 から API が変わっています。読み取り結果と `meta.target` は `{ type, pk, properties }` となり、走査は最初の引数にインスタンスを取ります。アクション定義は `defineAction(objects, definition)`、変更の記述は `modify(instance, changes)` を使います。保存済みの行と監査ログの edit データの形式は従来どおりです。公開済みの版は [release notes](https://github.com/gura105/operational-ontology/releases) にあります。
 
-集合 API への移行では、`search`・`traverse` の配列アクセスを `.objects` に置き換え、集合からの走査には `pivot`、等値条件の省略形には構造化条件を使います。集計は ObjectSet、属性名による `groupBy`、任意の数値属性 `sum` を受け取り、`{ set, columns, values }` を返します。リンクを使う集計や独自指標はモデルの Function に置きます。従来の配列を返す形式とコールバックによる集計形式は、オーバーロードとして残しません。
+集合 API への移行では、`search`・`traverse` の配列アクセスを `.objects` に置き換え、集合からの走査には `pivot`、filterの条件には述語関数を使います。集計は ObjectSet、属性名による `groupBy`、任意の数値属性 `sum` を受け取り、`{ set, columns, values }` を返します。リンクを使う集計や独自指標はモデルの Function に置きます。従来の配列を返す形式とコールバックによる集計形式は、オーバーロードとして残しません。
 
-このブランチの型の簡略化では、`Where`・`TraverseOptions` のモデル引数と、`AggregationResult<O>` の集計列名の型引数を削除しています。モデルから名前・パラメータ・リンクの導線を導く型エイリアスも削除しました。呼び出しの書き方と JSON 形式は同じですが、以前の入力型で検出していた誤りは実行時の検査に届くようになります。
+このブランチの型の簡略化では、`TraverseOptions` のモデル引数と、`AggregationResult<O>` の集計列名の型引数を削除しています。モデルから名前・パラメータ・リンクの導線を導く型エイリアスも削除しました。モデル固有の操作入力は実行時に検査します。filterの条件句と `Where` 型は削除したため、ローカルの述語を使ってください。MCPの `search_*` は `{}` を受け取り、`aggregate_*` の `where` と `filter_*` ツールは削除しました。filterはクライアント側のコードへ移し、選んだIDを後続のツールに渡します。

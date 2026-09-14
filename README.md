@@ -147,7 +147,7 @@ pnpm mcp     # serve the same ontology over stdio
 
 The server generates tools such as `search_order`, `traverse_customer_orders`, `cancel_order`, and `read_audit_log` from the model. An agent cancelling a shipped order receives `SHIPPED_ORDER_CANNOT_BE_CANCELLED`, just as a human caller does. Business rules live in the model, so the prompt does not have to enforce them.
 
-The repository's [MCP configuration](./.mcp.json) connects the orders example. Session identity and tool input details are in the [implementation notes](./IMPLEMENTATION.md#visibility-and-caller-identity).
+The repository's [MCP configuration](./.mcp.json) connects the orders example. Agents filter returned data in their own code execution environment. The [implementation notes](./IMPLEMENTATION.md#mcp-query-inputs) describe this flow and tool inputs; [caller identity](./IMPLEMENTATION.md#visibility-and-caller-identity) is documented separately.
 
 https://github.com/user-attachments/assets/28327062-e09f-4103-943e-434a0e55b327
 

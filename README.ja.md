@@ -147,7 +147,7 @@ pnpm mcp     # 同じオントロジーを stdio 経由で公開
 
 モデルから `search_order`、`traverse_customer_orders`、`cancel_order`、`read_audit_log` などのツールが生成されます。エージェントが出荷済み注文をキャンセルすると、人間の呼び出しと同じく `SHIPPED_ORDER_CANNOT_BE_CANCELLED` が返ります。業務ルールはモデルにあるため、プロンプトにルールの強制を任せる必要がありません。
 
-リポジトリの [MCP 設定](./.mcp.json)で注文デモに接続できます。セッションの identity とツールの入力形式は[実装ノート](./IMPLEMENTATION.ja.md#可視性と呼び出し元の-identity)にまとめています。
+リポジトリの [MCP 設定](./.mcp.json)で注文デモに接続できます。取得したデータのfilterはエージェント自身のコード実行環境で行います。その流れと入力形式は[実装ノート](./IMPLEMENTATION.ja.md#mcp-のクエリ入力)、呼び出し元の扱いは[identityの説明](./IMPLEMENTATION.ja.md#可視性と呼び出し元の-identity)を参照してください。
 
 https://github.com/user-attachments/assets/2b811ee7-bff2-4694-b3bf-bf0f6ccc85d5
 

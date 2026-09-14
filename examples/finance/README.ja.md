@@ -44,7 +44,7 @@ const summary = rt.run('recipientSummary', {
   originIds: ['A', 'B', 'C'],
   after: '2026-09-08T12:00:00+09:00', before: '2026-09-09T00:00:00+09:00',
 }, { actor })
-const selected = rt.filter(summary.aggregation, [{ property: 'senderCount', op: 'gte', value: 2 }])
+const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
 // selected.set は口座 X・W。values はそれぞれの集計値を保持する。
 ```
 
@@ -68,4 +68,4 @@ Action は選んだ全取引について、現在も指定した起点からの�
 claude --strict-mcp-config --mcp-config examples/finance/.mcp.json
 ```
 
-エージェントは filter・pivot・集合演算と `recipient_summary` を組み合わせ、返された `aggregation` を `filter_account` に渡し、選んだ根拠で `open_investigation` を実行できます。Action は呼び出し元が渡す集計値とは独立して根拠を検査します。共通の契約は [IMPLEMENTATION.ja.md](../../IMPLEMENTATION.ja.md) にあります。
+エージェントは自身のコード実行環境で、返された取引や `recipient_summary` の集計行を絞り込みます。選んだIDをpivot・集合演算へ、選んだ根拠を `open_investigation` へ渡し、filterのコードはサーバーへ送りません。`scenario.test.ts` のMCPテストでこの流れを確認できます。Action は呼び出し元が渡す集計値とは独立して根拠を検査します。共通の契約は [IMPLEMENTATION.ja.md](../../IMPLEMENTATION.ja.md) にあります。

@@ -44,7 +44,7 @@ const summary = rt.run('recipientSummary', {
   originIds: ['A', 'B', 'C'],
   after: '2026-09-08T12:00:00+09:00', before: '2026-09-09T00:00:00+09:00',
 }, { actor })
-const selected = rt.filter(summary.aggregation, [{ property: 'senderCount', op: 'gte', value: 2 }])
+const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
 // selected.set contains Accounts X and W; values retain their metrics.
 ```
 
@@ -68,4 +68,4 @@ Run `pnpm mcp:finance`, or connect from the repository root:
 claude --strict-mcp-config --mcp-config examples/finance/.mcp.json
 ```
 
-Agents can combine generated filter/pivot/set tools with `recipient_summary`, pass its `aggregation` to `filter_account`, and then invoke `open_investigation` with the selected evidence. The Action checks evidence independently of caller-supplied metrics. See [IMPLEMENTATION.md](../../IMPLEMENTATION.md) for the common contracts.
+Agents use their own code execution environment to filter returned transfers and `recipient_summary` metric rows. They pass selected IDs to pivot/set tools and selected evidence to `open_investigation`; no filter code is sent to the server. The MCP test in `scenario.test.ts` demonstrates this flow. The Action checks evidence independently of caller-supplied metrics. See [IMPLEMENTATION.md](../../IMPLEMENTATION.md) for the common contracts.

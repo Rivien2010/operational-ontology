@@ -43,4 +43,4 @@ Run `pnpm mcp:factory`, or connect from the repository root with:
 claude --strict-mcp-config --mcp-config examples/factory/.mcp.json
 ```
 
-The server generates filter/pivot/set/aggregate tools, model Functions and Actions from the same definition. For example, `customer_impact` returns its aggregation and evidence, and `create_contact_task` rechecks that evidence. Runtime contracts are in [IMPLEMENTATION.md](../../IMPLEMENTATION.md). This example assumes one writer and visibility of all resources relevant to a decision.
+The server generates read/pivot/set/aggregate tools, model Functions and Actions from the same definition. Agents filter returned objects and metrics in their own code execution environment, then send selected IDs to the next tool. For example, `customer_impact` returns its aggregation and evidence, and `create_contact_task` rechecks that evidence. Runtime contracts are in [IMPLEMENTATION.md](../../IMPLEMENTATION.md). This example assumes one writer and visibility of all resources relevant to a decision.

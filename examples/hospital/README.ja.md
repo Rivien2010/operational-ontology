@@ -51,4 +51,4 @@ const nurses = rt.run('nurseSearch', { patientId: 'P1', bedId: bed.pk }, { actor
 claude --strict-mcp-config --mcp-config examples/hospital/.mcp.json
 ```
 
-モデルから `bed_search`・`nurse_search`・`allocate` と探索ツールを生成します。呼び出し元は患者や病床を選び、適合条件を実装せずに使えます。共通 API と失敗時の契約は [IMPLEMENTATION.ja.md](../../IMPLEMENTATION.ja.md) にあります。
+モデルから `bed_search`・`nurse_search`・`allocate` と探索ツールを生成します。呼び出し元は患者や病床を選び、適合条件を実装せずに使えます。患者や受入確認の絞り込みはエージェント自身のコード実行環境で行い、候補の適合判定はモデルに置きます。共通 API と失敗時の契約は [IMPLEMENTATION.ja.md](../../IMPLEMENTATION.ja.md) にあります。

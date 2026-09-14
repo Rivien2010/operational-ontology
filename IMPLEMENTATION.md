@@ -14,7 +14,7 @@ The public entry point remains `Runtime`; the implementation follows the respons
 | --- | --- |
 | `model.ts` | Definition helpers, instance shapes and edit plans. |
 | `core.ts` | Actor-scoped reads, the public query methods, `run` / `preview`, and the Action gate. |
-| `query.ts` | Pure operations on evaluated sets and aggregations; structured conditions shared with MCP. |
+| `query.ts` | Pure operations on evaluated sets and aggregations, using caller-supplied predicates. |
 | `store.ts` | Concrete SQLite storage, indexing, integrity checks, edits and atomic local audit commits. |
 | `mcp.ts` | Generate tools from the model and adapt inputs to the same runtime operations. |
 
@@ -34,7 +34,7 @@ const customers = rt.traverse(orders.objects[0], 'customerOrders', hq) // Object
 console.log(orders.objects[0].properties.status)
 ```
 
-This branch simplifies TypeScript contracts to make the implementation easier to read. Input names are strings, operation params and edit properties are plain records, and conditions have a common shape. The runtime checks model-specific names, values and relationships. The editor does not guide callers from an object to its links, directions or valid conditions.
+This branch simplifies TypeScript contracts to make the implementation easier to read. Input names are strings, operation params and edit properties are plain records, and filters are TypeScript predicates. The runtime checks model-specific names, values and relationships. The editor does not guide callers from an object to its links, directions or valid conditions.
 
 Basic data shapes, readonly identities and model-author callback types remain. A small result lookup also remains: a literal name in `get`, `search` or `run` determines its result type. Keep the inferred model definition for this lookup; an explicit `OntologyDef` annotation erases its specific schemas. A dynamic object name returns common instances with `unknown` property values; a dynamic operation name returns `unknown`. `traverse`, `pivot` and set algebra return the common `ObjectSet` shape. Business code that needs concrete properties after traversal must narrow or assert their types; an assertion does not validate a value.
 
@@ -65,23 +65,23 @@ An `ObjectSet<O>` is `{ type, objects }`: one object type and an array of its in
 
 ```ts
 const orders = rt.search('Order', { actor: 'user:hq' })
-const pending = rt.filter(orders, [{ property: 'status', op: 'eq', value: 'pending' }])
+const pending = rt.filter(orders, (order) => order.properties.status === 'pending')
 const large = rt.filter(orders, (order) => order.properties.total >= 10000)
 const either = rt.union(pending, large)       // OR
 const both = rt.intersect(pending, large)   // AND between sets
 const remaining = rt.subtract(orders, both)
 ```
 
-Structured conditions are an ANDed array of `{ property, op, value }`. TypeScript checks the clause shape and the fixed operator vocabulary. Model-specific field names, allowed operators and values are checked at runtime, including against an empty set, and appear in generated MCP schemas. `search` also accepts them in its optional `filter` option. The legacy `{ status: 'pending' }` equality shorthand is removed. Callbacks are synchronous TypeScript predicates; they must not cause side effects and cannot be sent over MCP.
+`filter` accepts only a synchronous TypeScript predicate; `search` accepts the same callback in its optional `filter` option. Equality objects, structured clause arrays and code strings are not supported. Predicates must not cause side effects; exceptions propagate without an action audit. The runtime checks the collection shape, while the callback controls comparisons, case sensitivity, OR/NOT, and null or missing values. It does not validate a callback's logic against property schemas or enforce purity.
 
-| Field | Operators |
-| --- | --- |
-| String / string enum | `eq`, `ne`, `in`, `contains`; case-sensitive. |
-| Number | `eq`, `ne`, `in`, `gt`, `gte`, `lt`, `lte`. |
-| Boolean | `eq`, `ne`, `in`. |
-| ISO date / datetime | `eq`, `ne`, `in`, `gt`, `gte`, `lt`, `lte`. |
+For dates, the examples compare `Date.parse(...)` values so different UTC offsets compare as instants. Dates remain strings in stored properties. For example:
 
-Declare dates with `z.iso.date()` or `z.iso.datetime({ offset: true })` so runtime validation and MCP schemas distinguish dates from ordinary strings. Datetimes are compared as instants, including offsets; dates are calendar dates interpreted at UTC midnight for comparison. They remain JSON strings in storage. Numeric values are not coerced from strings. Optional/nullable/default wrappers around supported scalar schemas are recognized, but comparing a null/missing value, grouping by one, or summing one is outside the query contract and throws; no implicit zero is used. Nested properties, array predicates and mixed-type schemas are not part of the structured condition language. OR uses union; NOT uses subtraction from an explicit base set.
+```ts
+const lots = rt.filter(produced, (lot) => {
+  const time = Date.parse(lot.properties.manufacturedAt as string)
+  return time >= Date.parse(window.after) && time < Date.parse(window.before)
+})
+```
 
 `aggregate(set, { groupBy, sum? })` groups by one scalar property, always computes `count`, and optionally sums one numeric property. Its result has three parts:
 
@@ -91,32 +91,45 @@ Declare dates with `z.iso.date()` or `z.iso.datetime({ offset: true })` so runti
 
 ```ts
 const grouped = rt.aggregate(pending, { groupBy: 'status', sum: 'total' })
-const selected = rt.filter(grouped, [{ property: 'sum', op: 'gte', value: 10000 }])
+const selected = rt.filter(grouped, (row) => (row.sum as number) >= 10000)
 console.log(selected.values) // Selected rows, with their original metrics
 const targets = selected.set // Order objects belonging to those rows
 ```
 
-There is no separate `having` method. Filtering an aggregation selects rows by numeric metrics and retains the union of their corresponding objects; it does not recompute metrics. To filter object properties, use `.set`, then aggregate again explicitly if needed. Filtering to zero rows keeps an empty tagged set and the column declarations. Grouping by a property does not pivot to the type that property might refer to.
+There is no separate `having` method. Filtering an aggregation applies the predicate to its rows and retains the union of their corresponding objects; it does not recompute metrics. To filter object properties, use `.set`, then aggregate again explicitly if needed. Filtering to zero rows keeps an empty tagged set and the column declarations. Grouping by a property does not pivot to the type that property might refer to.
 
-Model Functions can return the same `AggregationResult<O>` shape for domain summaries. For example, finance returns recipient **accounts** with `senderCount`, `transactionCount` and `totalAmount`, computed from **transfers**. `aggregationResult(set, columns, values)` validates finite numeric metrics, unique group keys and member references, and forms the corresponding set. Column declarations are runtime data used by filtering and MCP validation. TypeScript knows each row's `key` and `pks`; arbitrary metric access yields `unknown` and needs narrowing in a callback. Structured metric conditions use the same clause shape as object filters. Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Automatic path history, recursive traversal, arbitrary transforms, joins and a general aggregation language are not implemented.
+Model Functions can return the same `AggregationResult<O>` shape for domain summaries. For example, finance returns recipient **accounts** with `senderCount`, `transactionCount` and `totalAmount`, computed from **transfers**. `aggregationResult(set, columns, values)` validates finite numeric metrics, unique group keys and member references, and forms the corresponding set. Column declarations let local helpers validate the metric values and describe results to clients. TypeScript knows each row's `key` and `pks`; arbitrary metric access yields `unknown` and needs narrowing in a callback. Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Aggregation supports optional/nullable/default wrappers around scalar properties, but grouping by a null or missing value or summing one throws. Automatic path history, recursive traversal, arbitrary transforms, joins and a general aggregation language are not implemented.
 
 ## MCP query inputs
 
-The model generates `search_<type>`, `get_<type>`, `filter_<type>`, `union_<type>`, `intersect_<type>`, `subtract_<type>`, `aggregate_<type>`, plus `traverse_<link>` and `pivot_<link>`.
+The model generates `search_<type>`, `get_<type>`, `union_<type>`, `intersect_<type>`, `subtract_<type>`, `aggregate_<type>`, plus `traverse_<link>` and `pivot_<link>`.
 
 | Tool | Input |
 | --- | --- |
-| `search_<type>` | `{ where?: conditions }` |
+| `search_<type>` | `{}`; all objects visible to this session. |
 | `get_<type>` | `{ <primaryKey>: value }` |
-| `filter_<type>` | `{ source: { pks: [...] }, where: conditions }`, or a returned aggregation as `source`. |
 | `union/intersect/subtract_<type>` | `{ left: pks, right: pks }` |
-| `aggregate_<type>` | `{ pks, group_by, sum?, where? }` |
+| `aggregate_<type>` | `{ pks, group_by, sum? }` |
 | `traverse_<link>` | `{ source: { type, pk, properties }, direction? }` |
 | `pivot_<link>` | `{ source: { type, pks }, direction? }` |
 
-Object collections serialize as `{ type, objects }`. Inputs identified by primary key are reloaded under the session actor; supplied snapshots never grant visibility. Conditions use the same definitions and evaluator as TypeScript. No arbitrary code or SQL is accepted.
+Object collections serialize as `{ type, objects }`. The server accepts no filter clauses, callback strings, arbitrary code or SQL. Agents filter results in their own code execution environment, then pass selected IDs to the next tool. This requires a client with code execution; the repository does not provide that environment. Objects must be transferred to the client before local filtering, which limits this approach for large sets.
 
-For an aggregation input, `filter_<type>` validates the declared numeric columns and member correspondence, reloads target objects, and drops a whole group if any target member is missing or hidden. Supplied metrics remain caller-supplied analysis snapshots: the server neither recomputes them nor certifies their provenance or freshness. Actions must check their own current inputs and evidence, as the examples do. An aggregation's `.set` is the object input for the next exploration step; an outer Function result with extra evidence is not itself an aggregation.
+For example, with a `call<T>` helper that calls an MCP tool and decodes its JSON result:
+
+```ts
+const orders = await call<ObjectSet>('search_order', {})
+const pks = orders.objects
+  .filter((order) => order.properties.status === 'pending')
+  .map((order) => order.pk)
+const customers = await call<ObjectSet>('pivot_customer_orders', {
+  source: { type: 'Order', pks },
+})
+```
+
+For aggregate results, filter `.values` locally and deduplicate the selected rows' `pks`. Pass those IDs to a pivot, set operation or aggregation; the server does not accept a whole aggregation for filtering. Metrics remain snapshots from the earlier analysis. Each tool reloads IDs under the session actor, so an earlier result cannot grant access to an object that has since become hidden or disappeared. Actions independently recheck current business conditions and evidence. Candidate eligibility remains in model Functions and Actions; local filtering expresses the caller's investigation choices.
+
+The [finance MCP scenario test](./examples/finance/scenario.test.ts) demonstrates this client flow, including the `call<T>` helper, local date/metric filtering and an Action. A client's code may import the pure `filterObjects` / `filterAggregation` helpers from `query.ts` to retain the set envelope, but these helpers are not required to select IDs from returned JSON.
 
 ## Visibility and caller identity
 
@@ -245,6 +258,6 @@ These limits describe the current implementation:
 
 The API has changed since v0.3: object reads and `meta.target` use `{ type, pk, properties }`; traversal takes an instance first; actions use `defineAction(objects, definition)`; modifications use `modify(instance, changes)`. Stored rows and audit edit payloads retain their earlier format. Published versions are in the [release notes](https://github.com/gura105/operational-ontology/releases).
 
-For the set API migration: replace array access on `search` / `traverse` with `.objects`, use `pivot` for sets, and replace equality shorthand with structured conditions. Aggregation now takes an ObjectSet and a property-based `groupBy`, with optional numeric `sum`, and returns `{ set, columns, values }`; link-based or custom metrics belong in model Functions. The older array-return and callback-aggregation forms are not retained as overloads.
+For the set API migration: replace array access on `search` / `traverse` with `.objects`, use `pivot` for sets, and replace filter conditions with predicate callbacks. Aggregation now takes an ObjectSet and a property-based `groupBy`, with optional numeric `sum`, and returns `{ set, columns, values }`; link-based or custom metrics belong in model Functions. The older array-return and callback-aggregation forms are not retained as overloads.
 
-For this branch's type simplification, `Where` and `TraverseOptions` no longer take model parameters, and `AggregationResult<O>` no longer takes metric names. Model-dependent name, parameter and link-navigation aliases are removed. Call expressions and JSON formats remain the same; mistakes previously caught by those input types reach runtime validation instead.
+For this branch's type simplification, `TraverseOptions` no longer takes model parameters, and `AggregationResult<O>` no longer takes metric names. Model-dependent name, parameter and link-navigation aliases are removed. Model-specific operation inputs are checked at runtime. Filter clauses and the `Where` type are removed: use local predicates. MCP `search_*` takes `{}`, `aggregate_*` no longer takes `where`, and `filter_*` tools are removed. Move filtering to client-side code and pass selected IDs to subsequent tools.

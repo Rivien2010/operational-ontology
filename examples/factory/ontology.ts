@@ -75,11 +75,12 @@ export function createFactoryOntology(read: () => FactoryRead) {
           const equipment = read().get('Equipment', params.equipmentId, { actor })
           if (!equipment || equipment.properties.inspection !== 'anomaly') return reject('ANOMALY_REQUIRED', 'Choose equipment with a recorded inspection anomaly')
           if (Date.parse(params.after) >= Date.parse(params.before)) return reject('INVALID_WINDOW', 'after must precede before')
-          const lots = read().filter(read().traverse(equipment, 'producedOn', { actor }), [
-            { property: 'manufacturedAt', op: 'gte', value: params.after }, { property: 'manufacturedAt', op: 'lt', value: params.before },
-          ])
+          const lots = read().filter(read().traverse(equipment, 'producedOn', { actor }), (object) => {
+            const time = Date.parse(object.properties.manufacturedAt as string)
+            return time >= Date.parse(params.after) && time < Date.parse(params.before)
+          })
           const affected = read().pivot(lots, 'lotLines', { actor })
-          const shipments = read().filter(read().traverse(object, 'customerShipments', { actor }), [{ property: 'status', op: 'eq', value: 'shipped' }])
+          const shipments = read().filter(read().traverse(object, 'customerShipments', { actor }), (object) => object.properties.status === 'shipped')
           const valid = read().intersect(affected, read().pivot(shipments, 'shipmentLines', { actor }))
           if (new Set(params.lineIds).size !== params.lineIds.length || params.lineIds.some((id) => !valid.objects.some((line) => line.pk === id))) {
             return reject('INVALID_EVIDENCE', 'Choose distinct lines shipped to this customer from the selected equipment and manufacturing window')
@@ -108,9 +109,7 @@ export function createFactoryOntology(read: () => FactoryRead) {
             return lot
           }))
           const affected = read().pivot(lots, 'lotLines', { actor })
-          const shipments = read().filter(read().pivot(affected, 'shipmentLines', { actor }), [
-            { property: 'status', op: 'eq', value: 'shipped' },
-          ])
+          const shipments = read().filter(read().pivot(affected, 'shipmentLines', { actor }), (object) => object.properties.status === 'shipped')
           // Returning through shipments also reaches unaffected lots packed with
           // them. Intersect with the original lines to keep the evidence scoped.
           const lines = read().intersect(affected, read().pivot(shipments, 'shipmentLines', { actor }))

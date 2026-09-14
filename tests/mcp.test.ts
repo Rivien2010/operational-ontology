@@ -16,7 +16,7 @@ import { orders } from '../examples/orders/ontology.js'
 import { createErpAdapter } from '../examples/orders/erp-adapter.js'
 import pkg from '../package.json' with { type: 'json' }
 
-test('MCP set and aggregate tools reload visible members, validate conditions and remove partially visible groups', async (t) => {
+test('MCP clients filter locally and pass IDs to tools that reload visible members', async (t) => {
   const model = defineOntology({ name: 'visibility-sets', objects: {
     Item: defineObject({ primaryKey: 'id', properties: { id: z.string(), owner: z.string(), category: z.string(), amount: z.number() },
       visibility: ({ object, actor }) => actor === 'admin' || object.properties.owner === actor }),
@@ -42,17 +42,21 @@ test('MCP set and aggregate tools reload visible members, validate conditions an
   assert.deepEqual(ids(await call('union_item', { left: ['I1', 'I2'], right: ['I3', 'I1'] })), ['I1', 'I3'])
   assert.deepEqual(ids(await call('intersect_item', { left: ['I1', 'I2', 'I3'], right: ['I1', 'I2'] })), ['I1'])
   assert.deepEqual(ids(await call('subtract_item', { left: ['I1', 'I2', 'I3'], right: ['I1'] })), ['I3'])
-  assert.deepEqual(ids(await call('filter_item', { source: { pks: ['I1', 'I2', 'I3'] }, where: [{ property: 'amount', op: 'gt', value: 20 }] })), ['I3'])
+  const found = await call('search_item', {})
+  const selected = found.objects.filter((object: { properties: { amount: number } }) => object.properties.amount > 20)
+  assert.deepEqual(selected.map((object: { pk: string }) => object.pk), ['I3'])
   const grouped = await call('aggregate_item', { pks: ['I1', 'I2', 'I3'], group_by: 'category', sum: 'amount' })
   assert.deepEqual(grouped.values, [{ key: 'A', pks: ['I1'], count: 1, sum: 10 }, { key: 'B', pks: ['I3'], count: 1, sum: 30 }])
-  const selected = await call('filter_item', { source: grouped, where: [{ property: 'sum', op: 'gte', value: 20 }] })
-  assert.deepEqual(ids(selected.set), ['I3'])
-  const privileged = rt.aggregate(rt.search('Item', { actor: 'admin' }), { groupBy: 'category', sum: 'amount' })
-  const visibleGroups = await call('filter_item', { source: privileged, where: [] })
-  assert.deepEqual(visibleGroups.values, [{ key: 'B', pks: ['I3'], count: 1, sum: 30 }])
-  for (const args of [{ amount: 10 }, { where: [{ property: 'amount', op: 'eq', value: '10' }] }, { where: [{ property: 'category', op: 'gt', value: 'A' }] }]) {
+  const selectedIds = grouped.values.filter((row: { sum: number }) => row.sum >= 20).flatMap((row: { pks: string[] }) => row.pks)
+  assert.deepEqual(selectedIds, ['I3'])
+  // The next tool rechecks current visibility, even for IDs from an earlier read.
+  rt.load({ objects: { Item: [{ id: 'I3', owner: 'agent:bob', category: 'B', amount: 30 }] } })
+  assert.deepEqual((await call('aggregate_item', { pks: selectedIds, group_by: 'category', sum: 'amount' })).set.objects, [])
+  assert.equal((await client.listTools()).tools.some((tool) => tool.name.startsWith('filter_')), false)
+  for (const args of [{ amount: 10 }, { where: [] }, { predicate: 'object => true' }, { code: 'return []' }]) {
     assert.equal((await client.callTool({ name: 'search_item', arguments: args })).isError, true)
   }
+  assert.equal((await client.callTool({ name: 'aggregate_item', arguments: { pks: [], group_by: 'category', where: [] } })).isError, true)
   assert.deepEqual(rt.auditLog(), [])
 })
 
@@ -98,7 +102,6 @@ test('the tool surface is generated from the model — and contains no raw data 
     'traverse_order_notes',
     'traverse_order_products',
     'pivot_customer_orders', 'pivot_order_notes', 'pivot_order_products',
-    'filter_customer', 'filter_note', 'filter_order', 'filter_product',
     'union_customer', 'union_note', 'union_order', 'union_product',
     'intersect_customer', 'intersect_note', 'intersect_order', 'intersect_product',
     'subtract_customer', 'subtract_note', 'subtract_order', 'subtract_product',
@@ -110,11 +113,15 @@ test('the tool surface is generated from the model — and contains no raw data 
 
 test('an agent can read the model through search and traversal', async () => {
   const { client } = await connectedClient()
-  const search = await client.callTool({ name: 'search_order', arguments: { where: [{ property: 'status', op: 'eq', value: 'shipped' }] } })
-  const shipped = JSON.parse((search.content as any)[0].text).objects
+  const search = await client.callTool({ name: 'search_order', arguments: {} })
+  const shipped = JSON.parse((search.content as any)[0].text).objects.filter((order: any) => order.properties.status === 'shipped')
   assert.deepEqual(shipped.map((o: any) => o.pk).sort(), ['N-A-1001', 'S-SO-78'])
   assert.equal(shipped[0].type, 'Order')
   assert.equal(shipped[0].properties.status, 'shipped')
+  const customers = await client.callTool({ name: 'pivot_customer_orders', arguments: {
+    source: { type: 'Order', pks: shipped.map((order: any) => order.pk) },
+  } })
+  assert.deepEqual(JSON.parse((customers.content as any)[0].text).objects.map((customer: any) => customer.pk).sort(), ['N-C01', 'S-9001'])
 
   const get = await client.callTool({ name: 'get_customer', arguments: { id: 'N-C01' } })
   const customer = JSON.parse((get.content as any)[0].text)

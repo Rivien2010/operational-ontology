@@ -30,14 +30,14 @@ import type { Database } from 'better-sqlite3'
 import { defineOntology, isPlainJson, reject } from './model.js'
 import { Store } from './store.js'
 import * as query from './query.js'
-import type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter, Where } from './query.js'
+import type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter } from './query.js'
 import type {
   ActionCtx, ActionDef, ActionResult, AuditEntry, Edit, ObjectInstance,
   ObjectOf, OntologyDef, TraverseOptions, Violation, OperationResultOf,
 } from './model.js'
 export * from './model.js'
 export { objectSet, aggregationResult } from './query.js'
-export type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter, Where } from './query.js'
+export type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter } from './query.js'
 
 // ───────────────────────────── Write-back ─────────────────────────────
 
@@ -124,10 +124,10 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return this.#read<ObjectOf<Model, K>>(type, pk, opts.actor)
   }
 
-  /** Read visible objects, then apply conditions checked against the stored schema. */
+  /** Read visible objects, then apply the caller's predicate to those snapshots. */
   search<K extends string>(type: K, opts: { actor: string; filter?: ObjectFilter<ObjectOf<Model, K>> }): ObjectSet<ObjectOf<Model, K>> {
     const set = query.objectSet(type, this.#scan(type, opts.actor) as ObjectOf<Model, K>[])
-    return opts.filter === undefined ? set : query.filterObjects(set, opts.filter, this.ontology.objects[type].properties)
+    return opts.filter === undefined ? set : query.filterObjects(set, opts.filter)
   }
 
   /** Links, endpoints and direction are checked from the model at execution time. */
@@ -145,16 +145,14 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return this.#follow(set.type, set.objects.map((o) => o.pk), linkName, opts)
   }
 
-  /** Preserve the input shape; property/operator/value combinations are runtime checks. */
-  filter<O extends ObjectInstance>(input: ObjectSet<O>, where: ObjectFilter<O>): ObjectSet<O>
+  /** Filter snapshots or metric rows locally; neither callback is sent over MCP. */
+  filter<O extends ObjectInstance>(input: ObjectSet<O>, predicate: ObjectFilter<O>): ObjectSet<O>
   filter<O extends ObjectInstance>(
-    input: AggregationResult<O>, where: Where | ((row: AggregationRow) => boolean),
+    input: AggregationResult<O>, predicate: (row: AggregationRow) => boolean,
   ): AggregationResult<O>
-  filter(input: ObjectSet | AggregationResult, where: unknown): ObjectSet | AggregationResult {
-    if ('set' in input) return query.filterAggregation(input, where as Where)
-    const def = Object.hasOwn(this.ontology.objects, input.type) ? this.ontology.objects[input.type] : undefined
-    if (!def) throw new Error(`unknown object type "${input.type}"`)
-    return query.filterObjects(input, where, def.properties)
+  filter(input: ObjectSet | AggregationResult, predicate: unknown): ObjectSet | AggregationResult {
+    if ('set' in input) return query.filterAggregation(input, predicate as (row: AggregationRow) => boolean)
+    return query.filterObjects(input, predicate as ObjectFilter)
   }
 
   /** Set algebra checks matching tags at runtime and preserves the left snapshots. */

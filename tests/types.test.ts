@@ -76,7 +76,8 @@ export function compileOnly(rt: Runtime<typeof model>, name: string): void {
   rt.get('Unknown', 'id', actor)
   rt.traverse(order, name, actor)
   rt.traverse(order, 'manages', actor)
-  rt.search('Order', { ...actor, filter: [{ property: 'status', op: 'eq', value: 'lost' }] })
+  // @ts-expect-error predicate callbacks retain the properties of an explicit object type
+  rt.search('Order', { ...actor, filter: (object) => object.properties.status === 'lost' })
   rt.run('cancelOrder', { orderId: 'O1' }, actor)
   rt.preview(name, {}, actor)
   modify(order, { status: 'lost', missing: 1 })
@@ -145,7 +146,7 @@ test('reads, traversal, callbacks and action targets share the instance shape', 
   assert.deepEqual(orders.map((o) => o.pk), ['O1', 'O2'])
   assert.deepEqual(rt.traverse(orders[0], 'customerOrders', actor).objects, [customer])
   assert.deepEqual(rt.search('Order', { ...actor, filter: (o) => o.properties.status === 'pending' }).objects, [orders[0]])
-  const pending = rt.search('Order', { ...actor, filter: [{ property: 'status', op: 'eq', value: 'pending' }] })
+  const pending = rt.search('Order', { ...actor, filter: (object) => object.properties.status === 'pending' })
   assert.deepEqual(rt.aggregate(pending, { groupBy: 'status', sum: 'total' }).values,
     [{ key: 'pending', pks: ['O1'], count: 1, sum: 100 }])
   assert.equal(rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor).ok, true)
@@ -203,7 +204,7 @@ test('identity does not collide with business properties or primary keys in anot
   assert.deepEqual(left, { type: 'Left', pk: 'same', properties })
   assert.deepEqual(rt.traverse(left, 'pair', actor).objects, [right])
   assert.deepEqual(rt.traverse(right, 'pair', actor).objects, [left])
-  assert.deepEqual(rt.search('Left', { ...actor, filter: [{ property: 'type', op: 'eq', value: 'business type' }] }).objects, [left])
+  assert.deepEqual(rt.search('Left', { ...actor, filter: (object) => object.properties.type === 'business type' }).objects, [left])
   assert.deepEqual(modify(left, { type: 'new business type' }), {
     op: 'modify', object: 'Left', pk: 'same', changes: { type: 'new business type' },
   })

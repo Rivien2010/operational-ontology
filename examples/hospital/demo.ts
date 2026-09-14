@@ -7,9 +7,9 @@ const { rt } = app
 const actor = 'user:admission-planner'
 try {
   const patients = rt.pivot(rt.search('Hospital', { actor }), 'hospitalPatients', { actor })
-  const waiting = rt.filter(patients, [{ property: 'status', op: 'eq', value: 'waiting' }])
+  const waiting = rt.filter(patients, (object) => object.properties.status === 'waiting')
   const admissions = rt.pivot(waiting, 'patientAdmission', { actor })
-  const confirmed = rt.filter(admissions, [{ property: 'confirmation', op: 'eq', value: 'approved' }])
+  const confirmed = rt.filter(admissions, (object) => object.properties.confirmation === 'approved')
   const ready = rt.pivot(confirmed, 'patientAdmission', { actor })
   console.log('Waiting:', waiting.objects.map((p) => p.pk), 'Confirmed:', ready.objects.map((p) => p.pk))
   console.log('Returning to Patient yields P1 and P4, not every patient. Select P1 for this plan.')

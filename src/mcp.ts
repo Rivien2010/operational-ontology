@@ -4,7 +4,7 @@
  * Generates an MCP server from an ontology definition. Because the model is
  * data, the agent-facing tool surface is derived, not hand-written:
  *
- *   - per object type:  search/get/filter/aggregate and set algebra
+ *   - per object type:  search/get/aggregate and set algebra
  *   - per link type:    traverse_<link>, pivot_<link> (both directions)
  *   - per action:       <action>, guarded by the same preconditions as
  *                       every other caller
@@ -18,12 +18,14 @@
  * This file adapts JSON inputs and outputs, derives schemas, and supplies the
  * session actor. Runtime still executes queries and checks Action plans;
  * transport handlers do not reproduce domain rules or write directly to Store.
+ * Clients filter results in their own code execution environment; no code is
+ * accepted or executed by this server.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { objectSet, aggregationResult } from './core.js'
-import type { ActionResult, AggregationResult, ObjectInstance, Runtime, OntologyDef } from './core.js'
-import { fieldInfo, whereSchema, type Condition } from './query.js'
+import { objectSet } from './core.js'
+import type { ActionResult, ObjectInstance, Runtime, OntologyDef } from './core.js'
+import { fieldKind } from './query.js'
 import pkg from '../package.json' with { type: 'json' }
 
 /**
@@ -72,24 +74,15 @@ export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, op
   // objects drop out; caller-supplied properties never replace the stored values.
   const hydrate = (type: string, pks: readonly string[], actor: string) => objectSet(type,
     pks.map((pk) => rt.get(type, pk, { actor })).filter((object) => object !== undefined))
-  // Custom Function column names are known only from the supplied aggregation.
-  // This checks the envelope; query.filterAggregation checks columns and op/value pairs.
-  const metricWhere = z.array(z.object({
-    property: z.string().describe('A numeric column named in the aggregation result columns.'),
-    op: z.enum(['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'in']),
-    value: z.union([z.number(), z.array(z.number())]),
-  }).strict())
-
   for (const [typeName, def] of Object.entries(rt.ontology.objects)) {
-    const where = whereSchema(def.properties)
     server.registerTool(
       toolName(`search_${snake(typeName)}`, `object type ${typeName}`),
       {
-        description: `Search ${typeName} objects. Conditions are ANDed and property/operator/value types follow the model. Results are scoped to this session.`,
-        inputSchema: z.object({ where: where.optional() }).strict(),
+        description: `Read ${typeName} objects visible to this session. Filter the returned objects in client-side code, then pass selected IDs to pivot, set or aggregate tools.`,
+        inputSchema: z.object({}).strict(),
       },
-      guarded(async (args: { where?: Condition[] }, extra: { sessionId?: string }) =>
-        asJson(rt.search(typeName, { actor: actorOf(extra), filter: args.where }))),
+      guarded(async (_args: Record<string, never>, extra: { sessionId?: string }) =>
+        asJson(rt.search(typeName, { actor: actorOf(extra) }))),
     )
     server.registerTool(
       toolName(`get_${snake(typeName)}`, `object type ${typeName}`),
@@ -101,37 +94,6 @@ export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, op
         asJson(rt.get(typeName, String(args[def.primaryKey]), { actor: actorOf(extra) }) ?? null)),
     )
 
-    // Accept the result's JSON shape so it can feed a later filter call. Member
-    // objects are reloaded below; supplied metrics remain analysis snapshots,
-    // not certified facts or values recalculated from the database.
-    const aggregation = z.object({
-      set: z.object({ type: z.literal(typeName), objects: z.array(z.object({
-        type: z.literal(typeName), pk: z.string(), properties: z.record(z.string(), z.unknown()),
-      }).strict()) }).strict(),
-      columns: z.record(z.string(), z.literal('number')),
-      values: z.array(z.object({ key: z.union([z.string(), z.number(), z.boolean()]), pks: z.array(z.string()) }).catchall(z.number())),
-    }).strict()
-    server.registerTool(
-      toolName(`filter_${snake(typeName)}`, `filter ${typeName}`),
-      {
-        description: `Filter a ${typeName} set by properties, or an aggregation by numeric columns. Pass source={pks:[...]} for objects, or the returned aggregation with set/columns/values. Object snapshots are reloaded as this session; supplied metrics are analysis data and are not recomputed.`,
-        inputSchema: z.object({ source: z.union([z.object({ pks: z.array(z.string()) }).strict(), aggregation]), where: z.union([where, metricWhere]) }).strict(),
-      },
-      guarded(async (args: { source: { pks: string[] } | AggregationResult<ObjectInstance>; where: Condition[] }, extra: { sessionId?: string }) => {
-        const actor = actorOf(extra)
-        if ('pks' in args.source) return asJson(rt.filter(hydrate(typeName, args.source.pks, actor), args.where))
-        const source = args.source
-        // Validate the incoming correspondence before applying session visibility.
-        const checked = aggregationResult(source.set, source.columns, source.values)
-        const set = hydrate(typeName, checked.set.objects.map((o) => o.pk), actor)
-        const visible = new Set(set.objects.map((o) => o.pk))
-        // A partially visible group cannot retain a metric computed for all its members.
-        // Drop the whole row: its metric may come from other evidence (e.g.
-        // transfers), so the remaining target objects cannot reconstruct it.
-        const rows = checked.values.filter((row) => row.pks.every((pk) => visible.has(pk)))
-        return asJson(rt.filter(aggregationResult(set, checked.columns, rows), args.where))
-      }),
-    )
     // Per-type tools make both ID lists use the same object identity namespace.
     for (const op of ['union', 'intersect', 'subtract'] as const) {
       server.registerTool(
@@ -144,22 +106,21 @@ export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, op
     }
     // Reuse query's field classification so agent choices match local validation:
     // supported scalar properties for groups, numeric properties for sums.
-    const propertyKeys = Object.entries(def.properties).filter(([, schema]) => fieldInfo(schema as z.ZodType)).map(([key]) => key) as [string, ...string[]]
-    const numericKeys = Object.entries(def.properties).filter(([, schema]) => fieldInfo(schema as z.ZodType)?.kind === 'number').map(([key]) => key)
+    const propertyKeys = Object.entries(def.properties).filter(([, schema]) => fieldKind(schema as z.ZodType)).map(([key]) => key) as [string, ...string[]]
+    const numericKeys = Object.entries(def.properties).filter(([, schema]) => fieldKind(schema as z.ZodType) === 'number').map(([key]) => key)
     const aggregateShape: Record<string, z.ZodType> = {
-      pks: z.array(z.string()), group_by: z.enum(propertyKeys), where: where.optional(),
+      pks: z.array(z.string()), group_by: z.enum(propertyKeys),
     }
     if (numericKeys.length > 0) aggregateShape.sum = z.enum(numericKeys as [string, ...string[]]).optional()
     server.registerTool(
       toolName(`aggregate_${snake(typeName)}`, `aggregate ${typeName}`),
       {
-        description: `Group the selected ${typeName} objects by one property, count members and optionally sum a numeric property. Returns set, numeric columns, and values with member pks. Use filter_${snake(typeName)} to filter the result.`,
+        description: `Group the selected ${typeName} objects by one property, count members and optionally sum a numeric property. Returns set, numeric columns, and values with member pks. Filter metric rows in client-side code and use their pks to continue exploring.`,
         inputSchema: z.object(aggregateShape).strict(),
       },
       guarded(async (rawArgs: Record<string, unknown>, extra: { sessionId?: string }) => {
-        const args = rawArgs as { pks: string[]; group_by: string; sum?: string; where?: Condition[] }
-        const source = hydrate(typeName, args.pks, actorOf(extra))
-        const set = args.where === undefined ? source : rt.filter(source, args.where)
+        const args = rawArgs as { pks: string[]; group_by: string; sum?: string }
+        const set = hydrate(typeName, args.pks, actorOf(extra))
         return asJson(args.sum === undefined ? rt.aggregate(set, { groupBy: args.group_by })
           : rt.aggregate(set, { groupBy: args.group_by, sum: args.sum }))
       }),

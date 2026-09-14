@@ -6,7 +6,7 @@ import {
   aggregationResult, createRuntime, defineLink, defineObject, defineOntology, objectSet,
   type AggregationResult, type ObjectOf, type ObjectSet, type Runtime,
 } from '../src/index.js'
-import { aggregate, combine, filterAggregation, filterObjects, whereSchema } from '../src/query.js'
+import { aggregate, combine, filterAggregation, filterObjects } from '../src/query.js'
 
 const fields = {
   id: z.string(), family: z.string(), units: z.number(), quality: z.enum(['good', 'suspect']),
@@ -59,48 +59,40 @@ test('set identity, empty tags and stable algebra require no database', () => {
   assert.deepEqual(ids(a), ['L2', 'L1'], 'inputs were not changed')
 })
 
-test('structured filters use AND, exact case, typed values and instant comparisons', () => {
-  const input = lots()
-  assert.deepEqual(ids(filterObjects(input, [
-    { property: 'family', op: 'eq', value: 'A' }, { property: 'units', op: 'gte', value: 30 },
-  ], fields)), ['L1', 'L2'])
-  assert.deepEqual(ids(filterObjects(input, [{ property: 'family', op: 'contains', value: 'a' }], fields)), [])
-  for (const [op, value, expected] of [
-    ['ne', 'A', ['L4']], ['in', ['A'], ['L1', 'L2', 'L3']], ['contains', 'A', ['L1', 'L2', 'L3']],
-  ] as const) assert.deepEqual(ids(filterObjects(input, [{ property: 'family', op, value }], fields)), expected)
-  for (const [op, expected] of [['gt', ['L1', 'L4']], ['gte', ['L1', 'L2', 'L4']],
-    ['lt', ['L3']], ['lte', ['L2', 'L3']]] as const) {
-    assert.deepEqual(ids(filterObjects(input, [{ property: 'units', op, value: 30 }], fields)), expected)
-  }
-  assert.equal(filterObjects(input, [{ property: 'released', op: 'eq', value: true }], fields).objects.length, 4)
-  assert.deepEqual(filterObjects(input, [{ property: 'producedAt', op: 'eq', value: '2026-09-06T00:00:00Z' }], fields), input)
-  const dates = objectSet('Lot', [lot('before', 'A', 1, '2026-09-05T23:59:59+09:00'),
-    lot('inside', 'A', 1), lot('after', 'A', 1, '2026-09-07T00:00:00+09:00')])
-  assert.deepEqual(ids(filterObjects(dates, [
-    { property: 'producedAt', op: 'gte', value: '2026-09-06T00:00:00+09:00' },
-    { property: 'producedAt', op: 'lt', value: '2026-09-07T00:00:00+09:00' },
-  ], fields)), ['inside'])
-  assert.deepEqual(ids(filterObjects(input, (o: Lot) => o.properties.units === 20, fields)), ['L3'])
-  const day = objectSet('Day', [{ type: 'Day', pk: 'D1', properties: { on: '2026-09-06' } }])
-  assert.deepEqual(filterObjects(day, [{ property: 'on', op: 'gte', value: '2026-09-06' }], { on: z.iso.date() }), day)
-  assert.deepEqual(filterObjects(day, [{ property: 'on', op: 'lt', value: '2026-09-06' }], { on: z.iso.date() }).objects, [])
+test('local predicates select snapshots and keep the set tag, order and identity', (t) => {
+  const rt = runtime(t)
+  const input = rt.search('Lot', { actor: 'admin' })
+  const selected = rt.filter(input, (lot) => lot.properties.family === 'A' && lot.properties.units >= 30)
+  assert.deepEqual(ids(selected), ['L1', 'L2'])
+  assert.equal(selected.type, 'Lot')
+  assert.equal(selected.objects[0], input.objects[0], 'filter shares read snapshots')
+  assert.deepEqual(ids(input), ['L1', 'L2', 'L3', 'L4'])
+  assert.deepEqual(rt.filter(selected, () => false), { type: 'Lot', objects: [] })
+  assert.throws(() => rt.filter(input, () => { throw new Error('bad predicate') }), /bad predicate/)
+  const seen: string[] = []
+  rt.search('Employee', { actor: 'alice', filter: (employee) => { seen.push(employee.pk); return true } })
+  assert.deepEqual(seen, ['E1', 'E2'], 'search applies visibility before the predicate')
+  assert.deepEqual(rt.auditLog(), [])
 })
 
-test('invalid conditions fail on empty sets too; null and coercion are not query features', () => {
-  const empty = objectSet('Lot', [] as Lot[])
-  for (const where of [
-    { quality: 'suspect' }, [{ property: 'missing', op: 'eq', value: 1 }],
-    [{ property: 'quality', op: 'eq', value: 'lost' }], [{ property: 'units', op: 'gte', value: '30' }],
-    [{ property: 'units', op: 'contains', value: '3' }], [{ property: 'family', op: 'gte', value: 'A' }],
-    [{ property: 'released', op: 'gt', value: false }], [{ property: 'quality', op: 'isNull' }],
-    [{ property: 'producedAt', op: 'gte', value: 'September 6' }],
-  ]) assert.throws(() => filterObjects(empty, where, fields))
-  assert.equal(whereSchema(fields).safeParse([{ property: 'units', op: 'in', value: [20, 30] }]).success, true)
-  const broken = lots()
-  ;(broken.objects[0].properties as Record<string, unknown>).units = '40'
-  assert.throws(() => filterObjects(broken, [{ property: 'units', op: 'gt', value: 30 }], fields), /value type/)
-  ;(broken.objects[0].properties as Record<string, unknown>).units = null
-  assert.throws(() => filterObjects(broken, [{ property: 'units', op: 'eq', value: 30 }], fields), /null, missing/)
+test('predicates define date and missing-value semantics; serialized conditions are not accepted', () => {
+  const dates = objectSet('Lot', [lot('before', 'A', 1, '2026-09-05T23:59:59+09:00'),
+    lot('inside', 'A', 1, '2026-09-06T00:00:00Z'), lot('after', 'A', 1, '2026-09-07T00:00:00+09:00')])
+  const selected = filterObjects(dates, (lot) => {
+    const time = Date.parse(lot.properties.producedAt)
+    return time >= Date.parse('2026-09-06T00:00:00+09:00') && time < Date.parse('2026-09-07T00:00:00+09:00')
+  })
+  assert.deepEqual(ids(selected), ['inside'])
+  const nullable = objectSet('Value', [
+    { type: 'Value', pk: 'missing', properties: { amount: null } },
+    { type: 'Value', pk: 'present', properties: { amount: 5 } },
+  ])
+  assert.deepEqual(ids(filterObjects(nullable, (value) => value.properties.amount === null)), ['missing'])
+  for (const input of [lots(), objectSet('Lot', [] as Lot[])]) {
+    for (const invalid of [{ quality: 'suspect' }, [{ property: 'units', op: 'gte', value: 30 }], 'object => true']) {
+      assert.throws(() => filterObjects(input, invalid as never), /predicate function/)
+    }
+  }
 })
 
 test('filtering aggregate rows keeps the corresponding members and does not recompute metrics', (t) => {
@@ -112,14 +104,14 @@ test('filtering aggregate rows keeps the corresponding members and does not reco
     { key: 'A', pks: ['L1', 'L2', 'L3'], count: 3, sum: 90 },
     { key: 'B', pks: ['L4'], count: 1, sum: 50 },
   ])
-  const selected = rt.filter(grouped, [{ property: 'count', op: 'gte', value: 2 }, { property: 'sum', op: 'gte', value: 80 }])
+  const selected = rt.filter(grouped, (row) => (row.count as number) >= 2 && (row.sum as number) >= 80)
   assert.deepEqual(ids(selected.set), ['L1', 'L2', 'L3'])
   assert.equal(selected.values[0].sum, 90)
-  const larger = rt.filter(selected.set, [{ property: 'units', op: 'gte', value: 30 }])
+  const larger = rt.filter(selected.set, (lot) => lot.properties.units >= 30)
   assert.deepEqual(ids(larger), ['L1', 'L2'])
   assert.equal(selected.values[0].sum, 90)
   assert.equal(rt.aggregate(larger, { groupBy: 'family', sum: 'units' }).values[0].sum, 70)
-  const none = rt.filter(selected, [{ property: 'count', op: 'gt', value: 3 }])
+  const none = rt.filter(selected, (row) => (row.count as number) > 3)
   assert.deepEqual(none, { set: { type: 'Lot', objects: [] }, columns: { count: 'number', sum: 'number' }, values: [] })
   assert.deepEqual(rt.auditLog(), [])
 })
@@ -130,12 +122,12 @@ test('custom Function metrics use the same aggregation contract', () => {
     { key: 'X', pks: ['L1', 'L2'], senderCount: 3, totalAmount: 5100000 },
     { key: 'Y', pks: ['L3'], senderCount: 1, totalAmount: 100000 },
   ])
-  const selected = filterAggregation(result, [{ property: 'senderCount', op: 'gte', value: 2 }])
+  const selected = filterAggregation(result, (row) => (row.senderCount as number) >= 2)
   assert.deepEqual(ids(selected.set), ['L1', 'L2'])
   assert.equal(selected.values[0].totalAmount, 5100000)
   assert.throws(() => aggregationResult(set, { count: 'number' }, [{ key: 'A', pks: ['missing'], count: 1 }]), /unknown object/)
   assert.throws(() => aggregationResult(set, { count: 'number' }, [{ key: 'A', pks: ['L1'], count: NaN }]), /invalid metric/)
-  assert.throws(() => filterAggregation(result, [{ property: 'count', op: 'gte', value: 2 }]))
+  assert.throws(() => filterAggregation(result, [] as never), /predicate function/)
   assert.deepEqual(aggregate(objectSet('Lot', [] as Lot[]), { groupBy: 'family' }, fields),
     { set: { type: 'Lot', objects: [] }, columns: { count: 'number' }, values: [] })
 })
@@ -165,17 +157,18 @@ export function compileOnly(rt: Runtime<Model>) {
   input.objects.push(input.objects[0])
   // @ts-expect-error tags are readonly
   input.type = 'Lot'
-  // @ts-expect-error conditions still require the explicit clause array
+  // @ts-expect-error filter accepts only a predicate
   rt.filter(input, { quality: 'suspect' })
-  // @ts-expect-error operation vocabulary is fixed, even without property-specific hints
+  // @ts-expect-error serialized conditions are no longer supported
   rt.filter(input, [{ property: 'units', op: 'approximately', value: 40 }])
   const custom = aggregationResult(input, { senderCount: 'number' }, [{ key: 'X', pks: ['L1'], senderCount: 3 }])
-  const selected: AggregationResult<Lot> = rt.filter(custom, [{ property: 'senderCount', op: 'gte', value: 2 }])
+  const selected: AggregationResult<Lot> = rt.filter(custom, (row) => (row.senderCount as number) >= 2)
   const exact: ObjectSet<Lot> = selected.set
   // These are accepted by TypeScript and rejected by the runtime tests below.
   rt.union(input, equipment)
   objectSet('Equipment', input.objects)
-  rt.filter(input, [{ property: 'units', op: 'gt', value: '40' }])
+  // @ts-expect-error predicates must be synchronous
+  rt.filter(input, async () => true)
   rt.aggregate(input, { groupBy: 'family', sum: 'quality' })
   void exact
 }
@@ -189,16 +182,9 @@ test('public APIs reject model-specific mistakes without TypeScript navigation c
   }
   assert.throws(() => objectSet('Equipment', input.objects), /differently tagged/)
   const empty = rt.filter(input, () => false)
-  for (const where of [
-    [{ property: 'units', op: 'gt', value: '40' }],
-    [{ property: 'family', op: 'gt', value: 'A' }],
-    [{ property: 'producedAt', op: 'contains', value: '2026' }],
-    [{ property: 'quality', op: 'eq', value: 'lost' }],
-  ] as const) assert.throws(() => rt.filter(empty, where), z.ZodError)
   assert.throws(() => rt.aggregate(empty, { groupBy: 'unknown' }), /invalid groupBy/)
   assert.throws(() => rt.aggregate(input, { groupBy: 'family', sum: 'quality' }), /sum requires a numeric property/)
   const grouped = rt.aggregate(input, { groupBy: 'family' })
-  assert.throws(() => rt.filter(grouped, [{ property: 'sum', op: 'gt', value: 0 }]), z.ZodError)
   assert.deepEqual(ids(rt.filter(grouped, (row) => typeof row.count === 'number' && row.count >= 2).set), ['L1', 'L2', 'L3'])
   assert.deepEqual(rt.auditLog(), [], 'query errors never perform writes or audit actions')
 })

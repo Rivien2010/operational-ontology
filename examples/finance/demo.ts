@@ -9,10 +9,10 @@ const scope = { originIds: ['A', 'B', 'C'], after: '2026-09-08T12:00:00+09:00', 
 try {
   const paths = scope.originIds.map((id) => {
     const outgoing = rt.traverse(rt.get('Account', id, { actor })!, 'outgoing', { actor })
-    const afternoon = rt.filter(outgoing, [
-      { property: 'occurredAt', op: 'gte', value: scope.after },
-      { property: 'occurredAt', op: 'lt', value: scope.before },
-    ])
+    const afternoon = rt.filter(outgoing, (object) => {
+      const time = Date.parse(object.properties.occurredAt as string)
+      return time >= Date.parse(scope.after) && time < Date.parse(scope.before)
+    })
     return { origin: id, transfers: afternoon, recipients: rt.pivot(afternoon, 'incoming', { actor }) }
   })
   console.table(paths.map((p) => ({ origin: p.origin, recipients: p.recipients.objects.map((a) => a.pk).join(', ') })))
@@ -21,7 +21,7 @@ try {
 
   const summary = rt.run('recipientSummary', scope, { actor })
   console.table(summary.aggregation.values)
-  const selected = rt.filter(summary.aggregation, [{ property: 'senderCount', op: 'gte', value: 2 }])
+  const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
   console.log('At least two distinct senders:', selected.set.objects.map((a) => a.pk))
   console.log('X has four transfers from three senders, totalling 5,100,000 yen.')
   const account = common.objects[0]

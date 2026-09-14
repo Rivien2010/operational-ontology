@@ -16,18 +16,18 @@ function setup(t: TestContext) {
 
 test('factory investigates a supplied manufacturing window and records shipped-line evidence for one customer', (t) => {
   const { rt, sources } = setup(t)
-  const equipment = rt.filter(rt.search('Equipment', { actor }), [{ property: 'inspection', op: 'eq', value: 'anomaly' }])
+  const equipment = rt.filter(rt.search('Equipment', { actor }), (object) => object.properties.inspection === 'anomaly')
   assert.deepEqual(ids(equipment.objects), ['PRESS-1'])
-  const lots = rt.filter(rt.pivot(equipment, 'producedOn', { actor }), [
-    { property: 'manufacturedAt', op: 'gte', value: '2026-09-06T00:00:00+09:00' },
-    { property: 'manufacturedAt', op: 'lt', value: '2026-09-07T00:00:00+09:00' },
-  ])
+  const lots = rt.filter(rt.pivot(equipment, 'producedOn', { actor }), (object) => {
+    const time = Date.parse(object.properties.manufacturedAt as string)
+    return time >= Date.parse('2026-09-06T00:00:00+09:00') && time < Date.parse('2026-09-07T00:00:00+09:00')
+  })
   assert.deepEqual(ids(lots.objects), ['L1', 'L3'])
   assert.equal(lots.objects.every((lot) => lot.properties.releaseInspection === 'passed'), true)
-  assert.deepEqual(rt.filter(lots, [{ property: 'releaseInspection', op: 'eq', value: 'passed' }]), lots)
+  assert.deepEqual(rt.filter(lots, (object) => object.properties.releaseInspection === 'passed'), lots)
   const affected = rt.pivot(lots, 'lotLines', { actor })
   assert.deepEqual(ids(affected.objects), ['SL1', 'SL3', 'SL5', 'SL4'])
-  const shipments = rt.filter(rt.pivot(affected, 'shipmentLines', { actor }), [{ property: 'status', op: 'eq', value: 'shipped' }])
+  const shipments = rt.filter(rt.pivot(affected, 'shipmentLines', { actor }), (object) => object.properties.status === 'shipped')
   const lines = rt.intersect(affected, rt.pivot(shipments, 'shipmentLines', { actor }))
   assert.deepEqual(ids(lines.objects), ['SL1', 'SL3', 'SL4'])
   assert.deepEqual(ids(shipments.objects), ['S1', 'S2'])
@@ -55,7 +55,7 @@ test('factory investigates a supplied manufacturing window and records shipped-l
 
 test('factory impact counts affected line quantities once across converging paths', (t) => {
   const { rt } = setup(t)
-  const equipment = rt.filter(rt.search('Equipment', { actor }), [{ property: 'id', op: 'in', value: ['PRESS-1', 'OVEN-1'] }])
+  const equipment = rt.filter(rt.search('Equipment', { actor }), (object) => ['PRESS-1', 'OVEN-1'].includes(object.properties.id as string))
   const lots = rt.pivot(equipment, 'producedOn', { actor })
   assert.deepEqual(ids(lots.objects), ['L1', 'L2', 'L3'])
   const impact = rt.run('customerImpact', { lotIds: [...ids(lots.objects), 'L1'] }, { actor })
@@ -99,7 +99,7 @@ for (const status of ['pending', 'held']) {
   })
 }
 
-test('MCP clients discover customer impact, filter its metrics and record the returned evidence', async (t) => {
+test('MCP clients filter customer-impact metrics locally and record the returned evidence', async (t) => {
   const app = setup(t)
   const server = buildMcpServer(app.rt, { agent: 'investigator' })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
@@ -119,12 +119,11 @@ test('MCP clients discover customer impact, filter its metrics and record the re
   const impact = readJson(await client.callTool({ name: 'customer_impact', arguments: { lotIds: ['L1', 'L3'] } })) as
     ReturnType<typeof app.rt.ontology.functions.customerImpact.run>
   assert.deepEqual(impact.aggregation.values, [{ key: 'C1', pks: ['C1'], affectedUnits: 50, shipmentCount: 2 }])
-  const selected = readJson(await client.callTool({ name: 'filter_customer', arguments: {
-    source: impact.aggregation, where: [{ property: 'affectedUnits', op: 'gte', value: 40 }],
-  } })) as typeof impact.aggregation
-  assert.deepEqual(ids(selected.set.objects), ['C1'])
+  // This code runs in the client; only the resulting IDs return to the server.
+  const selectedIds = impact.aggregation.values.filter((row) => (row.affectedUnits as number) >= 40).flatMap((row) => row.pks)
+  assert.deepEqual(selectedIds, ['C1'])
   assert.deepEqual(app.rt.auditLog(), [])
-  const evidence = impact.evidence.find((e) => e.customerId === selected.set.objects[0].pk)!
+  const evidence = impact.evidence.find((e) => e.customerId === selectedIds[0])!
   readJson(await client.callTool({ name: 'create_contact_task', arguments: {
     customerId: evidence.customerId, equipmentId: 'PRESS-1', taskId: 'MCP-CONTACT',
     after: '2026-09-06T00:00:00+09:00', before: '2026-09-07T00:00:00+09:00',

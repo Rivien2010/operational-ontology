@@ -15,9 +15,9 @@ function setup(t: TestContext) {
 test('hospital pivots back only to confirmed waiting patients; candidate functions explain exclusions without writes', (t) => {
   const { rt } = setup(t)
   const all = rt.pivot(rt.search('Hospital', { actor }), 'hospitalPatients', { actor })
-  const waiting = rt.filter(all, [{ property: 'status', op: 'eq', value: 'waiting' }])
+  const waiting = rt.filter(all, (object) => object.properties.status === 'waiting')
   assert.deepEqual(ids(waiting.objects), ['P1', 'P2', 'P4'])
-  const confirmed = rt.filter(rt.pivot(waiting, 'patientAdmission', { actor }), [{ property: 'confirmation', op: 'eq', value: 'approved' }])
+  const confirmed = rt.filter(rt.pivot(waiting, 'patientAdmission', { actor }), (object) => object.properties.confirmation === 'approved')
   assert.deepEqual(ids(rt.pivot(confirmed, 'patientAdmission', { actor }).objects), ['P1', 'P4'])
   const beds = rt.run('bedSearch', { patientId: 'P1' }, { actor })
   assert.deepEqual(ids(beds.set.objects), ['B101'])

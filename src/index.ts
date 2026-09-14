@@ -38,7 +38,6 @@ export type {
   ObjectSet,
   AggregationResult,
   AggregationRow,
-  Where,
   TraverseOptions,
   Violation,
   Edit,

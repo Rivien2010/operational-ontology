@@ -9,16 +9,14 @@ const window = { after: '2026-09-06T00:00:00+09:00', before: '2026-09-07T00:00:0
 try {
   console.log('September 8: an equipment inspection found an anomaly. Release inspections had passed; goods shipped September 7.')
   console.log('September 6 is the supplied investigation window, not an inferred failure interval.')
-  const equipment = rt.filter(rt.search('Equipment', { actor }), [{ property: 'inspection', op: 'eq', value: 'anomaly' }])
+  const equipment = rt.filter(rt.search('Equipment', { actor }), (object) => object.properties.inspection === 'anomaly')
   const produced = rt.pivot(equipment, 'producedOn', { actor })
-  const lots = rt.filter(produced, [
-    { property: 'manufacturedAt', op: 'gte', value: window.after },
-    { property: 'manufacturedAt', op: 'lt', value: window.before },
-  ])
+  const lots = rt.filter(produced, (object) => {
+    const time = Date.parse(object.properties.manufacturedAt as string)
+    return time >= Date.parse(window.after) && time < Date.parse(window.before)
+  })
   const lines = rt.pivot(lots, 'lotLines', { actor })
-  const shipments = rt.filter(rt.pivot(lines, 'shipmentLines', { actor }), [
-    { property: 'status', op: 'eq', value: 'shipped' },
-  ])
+  const shipments = rt.filter(rt.pivot(lines, 'shipmentLines', { actor }), (object) => object.properties.status === 'shipped')
   const customers = rt.pivot(shipments, 'customerShipments', { actor })
   for (const [step, set] of Object.entries({ equipment, produced, lots, lines, shipments, customers })) {
     console.log(step, set.type, set.objects.map((o) => o.pk), `(${set.objects.length})`)

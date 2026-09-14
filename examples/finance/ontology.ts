@@ -44,10 +44,10 @@ export function createFinanceOntology(read: () => Read) {
     const accounts = params.originIds.map((id) => read().get('Account', id, { actor }))
     if (accounts.some((a) => !a)) return { error: reject('ORIGIN_MISSING', 'An origin account is missing or hidden') }
     const origins = objectSet('Account', accounts.filter((a) => a !== undefined))
-    const transfers = read().filter(read().pivot(origins, 'outgoing', { actor }), [
-      { property: 'occurredAt', op: 'gte', value: params.after },
-      { property: 'occurredAt', op: 'lt', value: params.before },
-    ])
+    const transfers = read().filter(read().pivot(origins, 'outgoing', { actor }), (object) => {
+      const time = Date.parse(object.properties.occurredAt as string)
+      return time >= Date.parse(params.after) && time < Date.parse(params.before)
+    })
     return { origins, transfers }
   }
   return defineOntology({

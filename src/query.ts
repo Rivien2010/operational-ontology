@@ -1,8 +1,8 @@
 /**
  * Evaluated sets and aggregations. These operations never read or write a store.
- * Types describe valid combinations first; the functions below validate and
- * evaluate them. Runtime reads supply actor-visible snapshots; these helpers
- * also accept caller-constructed values.
+ * The functions below validate collection shapes and evaluate callbacks.
+ * Runtime reads supply actor-visible snapshots; these helpers also accept
+ * caller-constructed values.
  * Filtering an existing snapshot does not refresh it or recheck visibility.
  */
 import { z } from 'zod'
@@ -14,10 +14,8 @@ export interface ObjectSet<O extends ObjectInstance = ObjectInstance> {
   readonly objects: readonly O[]
 }
 type Scalar = string | number | boolean
-/** These are data, not model-derived type expressions; whereSchema validates each clause. */
-export interface Condition { property: string; op: 'eq' | 'ne' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'; value: unknown }
-export type Where = readonly Condition[]
-export type ObjectFilter<O extends ObjectInstance = ObjectInstance> = Where | ((object: O) => boolean)
+/** Local predicates are ordinary synchronous TypeScript; they are never sent to MCP. */
+export type ObjectFilter<O extends ObjectInstance = ObjectInstance> = (object: O) => boolean
 
 /**
  * `set` holds the target objects; each row's `pks` associates metrics with members
@@ -69,95 +67,26 @@ export function combine(op: 'union' | 'intersect' | 'subtract', a: ObjectSet, b:
     : left.objects.filter((o) => op === 'intersect' ? ids.has(o.pk) : !ids.has(o.pk)))
 }
 
-/**
- * Classify stored fields for condition validation and MCP input schemas.
- * Query values need not satisfy every stored-value constraint: a nonnegative
- * amount can still be compared with -1. String enums retain their choice hints.
- */
-export function fieldInfo(schema: z.core.$ZodType) {
+/** Supported aggregation fields; MCP uses the same classification for its input schema. */
+export function fieldKind(schema: z.core.$ZodType): 'string' | 'number' | 'boolean' | undefined {
   let inner = schema as z.ZodType
   while (inner instanceof z.ZodOptional || inner instanceof z.ZodNullable || inner instanceof z.ZodDefault) inner = inner.unwrap() as z.ZodType
-  if (inner instanceof z.ZodString || inner instanceof z.ZodISODateTime || inner instanceof z.ZodISODate) {
-    const format = inner.format
-    if (format === 'datetime' || format === 'date') return {
-      kind: 'datetime' as const,
-      value: format === 'date' ? z.iso.date() : z.iso.datetime({ offset: true }),
-    }
-    return { kind: 'string' as const, value: z.string() }
-  }
-  if (inner instanceof z.ZodEnum) {
-    if (inner.options.every((v) => typeof v === 'number')) return { kind: 'number' as const, value: z.number() }
-    if (inner.options.every((v) => typeof v === 'string')) return { kind: 'string' as const, value: inner }
-  }
-  if (inner instanceof z.ZodLiteral) {
-    const values = [...inner.values]
-    if (values.every((v) => typeof v === 'string')) return { kind: 'string' as const, value: inner }
-    if (values.every((v) => typeof v === 'number')) return { kind: 'number' as const, value: z.number() }
-    if (values.every((v) => typeof v === 'boolean')) return { kind: 'boolean' as const, value: z.boolean() }
-  }
-  if (inner instanceof z.ZodNumber) return { kind: 'number' as const, value: z.number() }
-  if (inner instanceof z.ZodBoolean) return { kind: 'boolean' as const, value: z.boolean() }
+  if (inner instanceof z.ZodString || inner instanceof z.ZodISODateTime || inner instanceof z.ZodISODate) return 'string'
+  if (inner instanceof z.ZodNumber) return 'number'
+  if (inner instanceof z.ZodBoolean) return 'boolean'
+  const values = inner instanceof z.ZodEnum ? inner.options : inner instanceof z.ZodLiteral ? [...inner.values] : []
+  if (!values.length) return undefined
+  if (values.every((value) => typeof value === 'string')) return 'string'
+  if (values.every((value) => typeof value === 'number')) return 'number'
+  if (values.every((value) => typeof value === 'boolean')) return 'boolean'
   return undefined
 }
 
-function operations(kind: NonNullable<ReturnType<typeof fieldInfo>>['kind']): Condition['op'][] {
-  return ['eq', 'ne', 'in', ...(kind === 'string' ? ['contains' as const] : []),
-    ...(kind === 'number' || kind === 'datetime' ? ['gt', 'gte', 'lt', 'lte'] as const : [])]
-}
-
-/** The same field/operator definitions drive MCP schemas and local validation. */
-export function whereSchema(properties: Properties): z.ZodType<Condition[]> {
-  const clauses: z.ZodType[] = []
-  for (const [property, schema] of Object.entries(properties)) {
-    const info = fieldInfo(schema)
-    if (!info) continue
-    for (const op of operations(info.kind)) {
-      // Build complete clause alternatives: independent property/op/value enums
-      // would also admit invalid combinations such as contains on a number.
-      clauses.push(z.object({ property: z.literal(property), op: z.literal(op),
-        value: op === 'in' ? z.array(info.value) : op === 'contains' ? z.string() : info.value }).strict())
-    }
-  }
-  // Each supported field adds at least eq/ne/in, satisfying Zod's union arity.
-  // With no supported fields, only an empty condition array is accepted.
-  return z.array(clauses.length ? z.union(clauses as [z.ZodType, z.ZodType, ...z.ZodType[]]) : z.never()) as z.ZodType<Condition[]>
-}
-
-/** Clauses are ANDed; no implicit value coercion or case folding is performed. */
-export function predicate(properties: Properties, where: unknown): (properties: Record<string, unknown>) => boolean {
-  const conditions = whereSchema(properties).parse(where) // Validate even an empty input set.
-  return (values) => conditions.every(({ property, op, value }) => {
-    const info = fieldInfo(properties[property])!
-    const raw = values[property]
-    if (!scalar(raw)) throw new Error(`cannot compare null, missing or non-scalar property ${property}`)
-    if (info.kind !== 'datetime' && typeof raw !== info.kind) throw new Error(`invalid value type for ${property}`)
-    // Compare instants, not ISO text: differing offsets can describe the same
-    // instant. Date-only values are interpreted as UTC midnight by Date.parse.
-    const normalize = (v: unknown): Scalar => {
-      if (info.kind !== 'datetime') return v as Scalar
-      const parsed = info.value.parse(v)
-      return Date.parse(parsed as string)
-    }
-    const actual = normalize(raw)
-    if (op === 'in') return (value as unknown[]).some((item) => actual === normalize(item))
-    const expected = normalize(value)
-    switch (op) {
-      case 'eq': return actual === expected
-      case 'ne': return actual !== expected
-      case 'contains': return typeof actual === 'string' && actual.includes(expected as string)
-      case 'gt': return actual > expected
-      case 'gte': return actual >= expected
-      case 'lt': return actual < expected
-      case 'lte': return actual <= expected
-    }
-  })
-}
-
-export function filterObjects<O extends ObjectInstance>(set: ObjectSet<O>, where: unknown, properties: Properties): ObjectSet<O> {
+/** Preserve the tag and snapshots; comparison semantics belong to the caller's code. */
+export function filterObjects<O extends ObjectInstance>(set: ObjectSet<O>, predicate: ObjectFilter<O>): ObjectSet<O> {
+  if (typeof predicate !== 'function') throw new Error('filter requires a synchronous predicate function')
   const input = objectSet(set.type, set.objects)
-  const matches = typeof where === 'function' ? where as (o: O) => boolean
-    : ((test) => (o: O) => test(o.properties))(predicate(properties, where))
-  return objectSet(set.type, input.objects.filter(matches))
+  return objectSet(set.type, input.objects.filter(predicate))
 }
 
 /**
@@ -205,21 +134,19 @@ export function aggregationResult<O extends ObjectInstance>(
  * a separate operation when a newly calculated total is wanted.
  */
 export function filterAggregation<O extends ObjectInstance>(
-  input: AggregationResult<O>, where: Where | ((row: AggregationRow) => boolean),
+  input: AggregationResult<O>, predicate: (row: AggregationRow) => boolean,
 ): AggregationResult<O> {
+  if (typeof predicate !== 'function') throw new Error('filter requires a synchronous predicate function')
   const result = aggregationResult(input.set, input.columns, input.values)
-  const test = typeof where === 'function' ? where : predicate(
-    Object.fromEntries(Object.keys(result.columns).map((column) => [column, z.number()])), where,
-  )
-  return aggregationResult(result.set, result.columns, result.values.filter(test))
+  return aggregationResult(result.set, result.columns, result.values.filter(predicate))
 }
 
 /** Group existing snapshots by one property, retaining each group's members. */
 export function aggregate<O extends ObjectInstance>(
   set: ObjectSet<O>, options: { groupBy: string; sum?: string }, properties: Properties,
 ): AggregationResult<O> {
-  if (!own(properties, options.groupBy) || !fieldInfo(properties[options.groupBy])) throw new Error('invalid groupBy property')
-  if (options.sum !== undefined && (!own(properties, options.sum) || fieldInfo(properties[options.sum])?.kind !== 'number')) {
+  if (!own(properties, options.groupBy) || !fieldKind(properties[options.groupBy])) throw new Error('invalid groupBy property')
+  if (options.sum !== undefined && (!own(properties, options.sum) || fieldKind(properties[options.sum]) !== 'number')) {
     throw new Error('sum requires a numeric property')
   }
   const input = objectSet(set.type, set.objects)

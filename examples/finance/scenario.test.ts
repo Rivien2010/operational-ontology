@@ -20,9 +20,10 @@ function setup(t: TestContext) {
 test('finance distinguishes recipient intersection, distinct senders and repeated transfers in the supplied scope', (t) => {
   const { rt } = setup(t)
   const paths = scope.originIds.map((id) => {
-    const transfers = rt.filter(rt.traverse(rt.get('Account', id, { actor })!, 'outgoing', { actor }), [
-      { property: 'occurredAt', op: 'gte', value: scope.after }, { property: 'occurredAt', op: 'lt', value: scope.before },
-    ])
+    const transfers = rt.filter(rt.traverse(rt.get('Account', id, { actor })!, 'outgoing', { actor }), (object) => {
+      const time = Date.parse(object.properties.occurredAt as string)
+      return time >= Date.parse(scope.after) && time < Date.parse(scope.before)
+    })
     return rt.pivot(transfers, 'incoming', { actor })
   })
   assert.deepEqual(ids(paths.reduce((a, b) => rt.intersect(a, b)).objects), ['X'])
@@ -30,7 +31,7 @@ test('finance distinguishes recipient intersection, distinct senders and repeate
   assert.deepEqual(summary.scope.originIds, ['A', 'B', 'C'])
   const x = summary.aggregation.values.find((row) => row.key === 'X')!
   assert.deepEqual(x, { key: 'X', pks: ['X'], senderCount: 3, transactionCount: 4, totalAmount: 5100000 })
-  const selected = rt.filter(summary.aggregation, [{ property: 'senderCount', op: 'gte', value: 2 }])
+  const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
   assert.deepEqual(ids(selected.set.objects).sort(), ['W', 'X'])
   const evidence = summary.evidence.find((e) => e.accountId === 'X')!
   assert.deepEqual(ids(evidence.transfers.objects), ['T1a', 'T1b', 'T3', 'T4'])
@@ -80,7 +81,7 @@ test('finance rechecks evidence relationships after a source correction', (t) =>
   assert.equal(rt.get('Investigation', 'CASE-X', { actor }), undefined)
 })
 
-test('MCP combines a dated pivot, custom Function metrics, metric filtering and a validated case Action', async (t) => {
+test('MCP combines client-side date/metric filters with pivots and a validated case Action', async (t) => {
   const app = createFinance()
   const server = buildMcpServer(app.rt, { agent: 'reviewer' })
   const [ct, st] = InMemoryTransport.createLinkedPair()
@@ -98,20 +99,18 @@ test('MCP combines a dated pivot, custom Function metrics, metric filtering and 
   const listed = (await client.listTools()).tools
   assert.equal(listed.find((tool) => tool.name === 'recipient_summary')?.annotations?.readOnlyHint, true)
   const outgoing = await call<ObjectSet>('pivot_outgoing', { source: { type: 'Account', pks: ['A', 'B', 'C'] } })
-  const afternoon = await call<ObjectSet>('filter_transfer', { source: { pks: ids(outgoing.objects) }, where: [
-    { property: 'occurredAt', op: 'gte', value: scope.after }, { property: 'occurredAt', op: 'lt', value: scope.before },
-  ] })
-  assert.equal(afternoon.objects.length, 8)
-  const summary = await call<{ aggregation: AggregationResult<ObjectOf<Finance, 'Account'>> }>('recipient_summary', scope)
-  const selected = await call<typeof summary.aggregation>('filter_account', {
-    source: summary.aggregation, where: [{ property: 'senderCount', op: 'gte', value: 2 }],
+  const afternoon = outgoing.objects.filter((object) => {
+    const time = Date.parse(object.properties.occurredAt as string)
+    return time >= Date.parse(scope.after) && time < Date.parse(scope.before)
   })
-  assert.deepEqual(ids(selected.set.objects).sort(), ['W', 'X'])
-  assert.equal(selected.values.find((row) => row.key === 'X')!.totalAmount, 5100000)
-  const invalid = await client.callTool({ name: 'filter_account', arguments: {
-    source: summary.aggregation, where: [{ property: 'madeUpMetric', op: 'gte', value: 2 }],
-  } })
-  assert.equal(invalid.isError, true)
+  assert.equal(afternoon.length, 8)
+  const recipients = await call<ObjectSet>('pivot_incoming', { source: { type: 'Transfer', pks: ids(afternoon) } })
+  assert.deepEqual(ids(recipients.objects).sort(), ['W', 'X', 'Y', 'Z'])
+  const summary = await call<{ aggregation: AggregationResult<ObjectOf<Finance, 'Account'>> }>('recipient_summary', scope)
+  const selected = summary.aggregation.values.filter((row) => (row.senderCount as number) >= 2)
+  const selectedIds = [...new Set(selected.flatMap((row) => row.pks))]
+  assert.deepEqual(selectedIds.sort(), ['W', 'X'])
+  assert.equal(selected.find((row) => row.key === 'X')!.totalAmount, 5100000)
   assert.deepEqual(app.rt.auditLog(), [])
   await call('open_investigation', request)
   assert.equal(app.rt.auditLog()[0].actor, 'agent:reviewer')

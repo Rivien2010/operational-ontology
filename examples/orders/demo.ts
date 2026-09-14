@@ -47,9 +47,7 @@ console.log('who ordered Keyboard (reverse traversal):',
   rt.traverse(rt.get('Product', 'ITM-101', hq)!, 'orderProducts', hq).objects.map((o) => o.pk))
 const byRegion = new Map<string, { count: number; sum: number }>()
 for (const customer of rt.search('Customer', hq).objects) {
-  const pending = rt.filter(rt.traverse(customer, 'customerOrders', hq), [
-    { property: 'status', op: 'eq', value: 'pending' },
-  ])
+  const pending = rt.filter(rt.traverse(customer, 'customerOrders', hq), (object) => object.properties.status === 'pending')
   if (!pending.objects.length) continue
   const region = customer.properties.region
   const row = byRegion.get(region) ?? { count: 0, sum: 0 }

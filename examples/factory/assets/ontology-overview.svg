@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1230" role="img" aria-labelledby="title desc">
   <title id="title">Factory: trace shipments, record the response</title>
-  <desc id="desc">Factory schema with all six object types and eight declared links. Gray indicates source-backed state; orange indicates ontology-owned state. customerImpact reads shipped-line evidence. createContactTask rechecks evidence and creates a task with customer, equipment, lot and line links. Properties are selected, not exhaustive.</desc>
+  <desc id="desc">Factory schema with all six object types and eight declared links. Gray indicates source-backed state; orange indicates ontology-owned state. Filter and pivot find customers; intersection retains shipped-line evidence for summing units. createContactTask rechecks that evidence and creates a task with customer, equipment, lot and line links. Properties are selected, not exhaustive.</desc>
   <!-- Edit this SVG, then export its PNG at 2x with:
        rsvg-convert -w 2400 -o ontology-overview.png ontology-overview.svg -->
   <defs>
@@ -10,7 +10,7 @@
   </defs>
   <rect x="0" y="0" width="1200" height="1230" rx="0" fill="#FFFFFF"/>
   <text x="54" y="65" text-anchor="start" font-size="29" font-weight="760" fill="#20242A">Factory: trace shipments, record the response</text>
-  <text x="54" y="101" text-anchor="start" font-size="19" font-weight="500" fill="#747B84">6 object types · 8 link types · 1 Function · 1 Action</text>
+  <text x="54" y="101" text-anchor="start" font-size="19" font-weight="500" fill="#747B84">6 object types · 8 link types · 1 Action</text>
   <rect x="54" y="140" width="1092" height="630" rx="30" fill="#FFFFFF" stroke="#20242A" stroke-width="3"/>
   <text x="84" y="183" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">OBJECT TYPES &amp; LINKS</text>
   <text x="1116" y="183" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Selected properties · primary key: id</text>
@@ -98,20 +98,20 @@
   <text x="655" y="725" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">Arrows show declared from → to.</text>
   <text x="84" y="751" text-anchor="start" font-size="16" font-weight="500" fill="#747B84">1:N = one-to-many · M:N = many-to-many</text>
   <text x="655" y="751" text-anchor="start" font-size="16" font-weight="500" fill="#747B84">Pivot can follow either end of a link.</text>
-  <text x="54" y="812" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">MODEL OPERATIONS</text>
+  <text x="54" y="812" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">EXPLORATION &amp; ACTION</text>
   <rect x="54" y="835" width="530" height="314" rx="24" fill="#F8F9FA" stroke="#5B626B" stroke-width="2.5"/>
   <rect x="610" y="835" width="536" height="314" rx="24" fill="#FFF1DE" stroke="#C96A00" stroke-width="2.5"/>
-  <text x="80" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#5B626B" letter-spacing="1">FUNCTION · READ ONLY</text>
+  <text x="80" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#5B626B" letter-spacing="1">DEMO · EXPLORE THE EVIDENCE</text>
   <path d="M 644 853 L 656 866 L 644 879 L 632 866 Z" fill="#FFFFFF" stroke="#C96A00" stroke-width="2"/>
   <text x="670" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#C96A00" letter-spacing="1">ACTION · RULES &amp; AUDIT</text>
-  <g data-function="customerImpact">
-  <text x="80" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">customerImpact</text>
-  <text x="80" y="950" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">lotIds → Customer aggregation + evidence</text>
-  <text x="80" y="984" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Metrics: affectedUnits · shipmentCount</text>
-  <text x="80" y="1018" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Evidence: shipped ShipmentLine sets</text>
+  <g data-exploration="shipped-line-evidence">
+  <text x="80" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Filter → Pivot → Intersect → Sum</text>
+  <text x="80" y="950" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Find C1 through lots, lines and shipments.</text>
+  <text x="80" y="984" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Selected-lot lines ∩ shipped contents</text>
+  <text x="80" y="1018" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">SL1 + SL3 + SL4: 10 + 20 + 20 = 50 units</text>
   </g>
   <text x="80" y="1082" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">Excludes unshipped and unrelated lines.</text>
-  <text x="80" y="1122" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">Quantities are calculated at line grain.</text>
+  <text x="80" y="1122" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">Pass these same line IDs to the Action.</text>
   <g data-action="createContactTask">
   <text x="636" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">createContactTask</text>
   <text x="636" y="954" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Customer + equipment + window + line IDs</text>
@@ -120,6 +120,6 @@
   <text x="636" y="1056" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Keep the selected lots and lines as evidence.</text>
   <text x="636" y="1122" text-anchor="start" font-size="17" font-weight="650" fill="#C96A00">Records a task; sends no message.</text>
   </g>
-  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">Explore → inspect evidence → select a customer → run the Action</text>
+  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">Find the customer → narrow and sum evidence → record the contact task</text>
   <text x="1146" y="1214" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Operational Ontology · factory example</text>
 </svg>

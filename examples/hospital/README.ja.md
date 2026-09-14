@@ -18,7 +18,9 @@
   <img src="https://i.ytimg.com/vi/CoxjBmIpGMo/maxresdefault.jpg" alt="オントロジーの捜査型分析解説｜病院編" width="640">
 </a>
 
-動画の制作時点と API が異なります。現在の呼び出し方は [`demo.ts`](./demo.ts) を参照してください。
+[`demo.ts`](./demo.ts) は動画の探索と割当の流れに沿っています。
+
+確認済みの記録から患者へ戻った後、保存しておいた入院待ち患者集合との積集合を取り、P1・P4 を残します。その後、担当者が P1 を選びます。
 
 P1 に対する `bedSearch` は、病床の ObjectSet と、同じ病院の全病床の評価を返します。
 
@@ -30,6 +32,8 @@ P1 に対する `bedSearch` は、病床の ObjectSet と、同じ病院の全�
 | B104 | ソース側ですでに予約されている。 |
 
 B101 を選んだ後の `nurseSearch` は N1 を返します。N2 は枠がなく、N3 は夜勤です。両 Function は `{ set, assessments }` を返し、各評価には対象と、該当するすべての `{ code, message }` の理由が入ります。選択や Function 呼び出しでは、リンクの作成、資源の予約、監査の追記はしません。
+
+動画と同様に Function の処理を追えるよう、デモでは Patient → Hospital → Bed/Nurse の経路、入力属性、評価済みの除外理由を順に表示します。病床は受入可能（4→3床）、設備（3→2床）、予約・既存計画（2→1床）、看護師は勤務帯・区域（3→2人）、残り枠（2→1人）の順です。この表示には Function が返した理由を使い、適合条件は `ontology.ts` に置きます。
 
 ```ts
 const beds = rt.call('bedSearch', { patientId: 'P1' }, { actor })

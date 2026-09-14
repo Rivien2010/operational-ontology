@@ -18,7 +18,9 @@ The orange allocation links are absent initially. They are created by the alloca
   <img src="https://i.ytimg.com/vi/ubdg14M7wxw/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Hospital" width="640">
 </a>
 
-The API differs from the version used to make the video. See [`demo.ts`](./demo.ts) for current calls.
+[`demo.ts`](./demo.ts) follows the video's exploration and allocation flow.
+
+After pivoting back from approved confirmations, the demo intersects that Patient set with the saved waiting Patient set, retaining P1 and P4. The planner then selects P1.
 
 For P1, `bedSearch` returns a Bed ObjectSet plus assessments of all beds in the same hospital:
 
@@ -30,6 +32,8 @@ For P1, `bedSearch` returns a Bed ObjectSet plus assessments of all beds in the 
 | B104 | Already reserved at the source. |
 
 After selecting B101, `nurseSearch` returns N1. N2 has no slot; N3 is on the night shift. Both Functions return `{ set, assessments }`; each assessment includes the object and all applicable `{ code, message }` reasons. Selection and Function calls do not create links, reserve resources or write audit entries.
+
+To unpack the Functions as the video does, the demo displays Patient → Hospital → Bed/Nurse, the input properties, and the evaluated exclusions in order. The bed display progresses through ready status (4 → 3), equipment (3 → 2), and reservations/plans (2 → 1). Nurses progress through shift/area (3 → 2), then available capacity (2 → 1). These displays use the reasons returned by the Functions; eligibility rules remain in `ontology.ts`.
 
 ```ts
 const beds = rt.call('bedSearch', { patientId: 'P1' }, { actor })

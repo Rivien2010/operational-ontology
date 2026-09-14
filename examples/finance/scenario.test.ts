@@ -24,9 +24,17 @@ test('finance distinguishes recipient intersection, distinct senders and repeate
       const time = Date.parse(object.properties.occurredAt as string)
       return time >= Date.parse(scope.after) && time < Date.parse(scope.before)
     })
-    return rt.pivot(transfers, 'incoming', { actor })
+    return { transfers, recipients: rt.pivot(transfers, 'incoming', { actor }) }
   })
-  assert.deepEqual(ids(paths.reduce((a, b) => rt.intersect(a, b)).objects), ['X'])
+  const common = paths.map((path) => path.recipients).reduce((a, b) => rt.intersect(a, b))
+  assert.deepEqual(ids(common.objects), ['X'])
+  const incoming = rt.pivot(common, 'incoming', { actor })
+  assert.equal(incoming.objects.length, 7)
+  const scoped = paths.map((path) => path.transfers).reduce((a, b) => rt.union(a, b))
+  const retained = rt.intersect(incoming, scoped)
+  assert.deepEqual(ids(retained.objects), request.transferIds)
+  assert.equal(retained.objects.reduce((sum, transfer) => sum + (transfer.properties.amount as number), 0), 5100000)
+  assert.deepEqual(ids(rt.pivot(retained, 'outgoing', { actor }).objects), ['A', 'B', 'C'])
   const summary = rt.call('recipientSummary', { ...scope, originIds: ['A', 'B', 'C', 'A'] }, { actor })
   assert.deepEqual(summary.scope.originIds, ['A', 'B', 'C'])
   const x = summary.aggregation.values.find((row) => row.key === 'X')!
@@ -41,6 +49,9 @@ test('finance distinguishes recipient intersection, distinct senders and repeate
   assert.deepEqual(empty.aggregation.set, { type: 'Account', objects: [] })
   assert.throws(() => rt.call('recipientSummary', { ...scope, before: scope.after }, { actor }), /after must precede/)
   assert.throws(() => rt.call('recipientSummary', { ...scope, originIds: ['missing'] }, { actor }), /missing or hidden/)
+  assert.equal(rt.execute('openInvestigation', { ...request, accountId: common.objects[0].pk, transferIds: ids(retained.objects) }, { actor }).ok, true)
+  const saved = rt.get('Investigation', request.investigationId, { actor })!
+  assert.deepEqual(ids(rt.traverse(saved, 'investigationTransfers', { actor }).objects), ids(retained.objects))
 })
 
 test('finance saves target, scope and evidence as a case; rejects unrelated evidence without partial writes', (t) => {

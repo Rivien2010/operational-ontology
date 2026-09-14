@@ -24,4 +24,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm demo
+      - run: pnpm demo:factory
+      - run: pnpm demo:hospital
+      - run: pnpm demo:finance
       - run: node --test .github/scripts/*.test.mjs

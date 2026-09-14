@@ -1,14 +1,25 @@
-/** The model as data, its instance values, and the types derived from it. */
+/**
+ * The model as data, its instance values, and the types derived from it.
+ * Read from definitions to edit plans, then to the model-derived types below.
+ * Definition helpers retain literal names and Zod schemas for inference;
+ * they describe the ontology without creating a store or running operations.
+ */
 import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 
-/** A read snapshot. Identity is (type, pk); properties are business data. */
+/**
+ * A read snapshot. Identity is (type, pk); properties are business data.
+ * N preserves the object type's literal name; P is its parsed property shape.
+ * `readonly` protects identity in TypeScript, not by freezing the value.
+ * Changing this snapshot does not persist a change: writes require an Action.
+ */
 export interface ObjectInstance<N extends string = string, P = Record<string, unknown>> {
   readonly type: N
   readonly pk: string
   properties: P
 }
 
+/** A map of property names to validators, rather than a row's actual values. */
 export type Properties = z.ZodRawShape
 
 export interface ObjectTypeDef<S extends Properties = Properties> {
@@ -55,6 +66,7 @@ export interface ObjectTypeDef<S extends Properties = Properties> {
   description?: string
 }
 
+/** Check the definition and owned defaults now; Store checks individual rows later. */
 export function defineObject<S extends Properties>(def: ObjectTypeDef<S>): ObjectTypeDef<S> {
   if (!Object.hasOwn(def.properties, def.primaryKey)) {
     throw new Error(`primaryKey "${def.primaryKey}" is not one of the defined properties`)
@@ -98,6 +110,11 @@ export function isPlainJson(value: unknown): boolean {
   }
 }
 
+/**
+ * A relationship between object types, not an existing pair of instances.
+ * `from` and `to` give it an orientation; either end can be a query's starting
+ * point. Cardinality constrains stored relationships, not traversal direction.
+ */
 export interface LinkTypeDef<From extends string = string, To extends string = string> {
   from: From
   to: To
@@ -119,6 +136,7 @@ export interface LinkTypeDef<From extends string = string, To extends string = s
   description?: string
 }
 
+/** Retain literal endpoint names; defineOntology checks them against the assembled model. */
 export function defineLink<From extends string, To extends string>(
   def: LinkTypeDef<From, To>,
 ): LinkTypeDef<From, To> {
@@ -146,9 +164,13 @@ export type Edit =
   | { op: 'link'; link: string; from: string; to: string }
   | { op: 'unlink'; link: string; from: string; to: string }
 
-/** Describe a change to an instance; only execute() applies it. */
+/** `ok` narrows the result to edits or a business refusal; unexpected crashes still throw. */
+export type ActionResult = { ok: true; edits: Edit[] } | { ok: false; error: Violation }
+
+/** Describe a change to an instance; only running an action applies it. */
 // Infer the properties from the instance. A patch such as { status: 'lost' }
 // must not widen Order's status to make an invalid change fit.
+// NoInfer makes the patch use that inferred type without helping to choose it.
 export const modify = <Instance extends ObjectInstance>(
   object: Instance, changes: NoInfer<Partial<Instance['properties']>>,
 ): Edit => ({
@@ -157,6 +179,8 @@ export const modify = <Instance extends ObjectInstance>(
   pk: object.pk,
   changes,
 })
+// These helpers only describe edits. Names, payloads and relationship constraints
+// are checked against the model during preflight, before any write-back occurs.
 export const create = (object: string, pk: string, data: Record<string, unknown>): Edit => ({
   op: 'create',
   object,
@@ -169,12 +193,13 @@ export const unlink = (linkName: string, from: string, to: string): Edit => ({ o
 export interface ActionCtx<O = ObjectInstance, P = Record<string, unknown>> {
   /** The object the action targets, loaded from the ontology store. */
   object: O
+  /** Already parsed: schema defaults have been supplied before callbacks run. */
   params: P
   actor: string
 }
 
 /**
- * The schema side of an action — its type. Each `execute()` call is one
+ * The schema side of an action — its type. Each `run()` of this action is one
  * instance of it, applied or refused, recorded as an audit entry.
  */
 export interface ActionDef<S extends Properties = Properties, O extends ObjectInstance = ObjectInstance> {
@@ -186,7 +211,8 @@ export interface ActionDef<S extends Properties = Properties, O extends ObjectIn
   params: S
   description?: string
   /**
-   * Business rules. Each precondition may return `reject(code, message)` to
+   * Business rules. Like effects, these must be pure: preview() runs them too.
+   * Each precondition may return `reject(code, message)` to
    * refuse the write. These are domain rules ("a shipped order cannot be
    * cancelled"), not access control — a permission system decides *who* may
    * act; preconditions decide *whether the operation is valid at all*.
@@ -210,7 +236,11 @@ export interface ActionDef<S extends Properties = Properties, O extends ObjectIn
   writeback?: boolean
 }
 
-/** Give rules the object schema before their callbacks are inferred. */
+/**
+ * Give rules the object schema before their callbacks are inferred. Passing
+ * definitions separately lets callback hints come from the selected object
+ * and parameter schemas, without inferring them from the callback bodies.
+ */
 export function defineAction<Objects extends ObjectDefinitions, K extends keyof Objects & string, S extends Properties>(
   objects: Objects,
   def: ActionDef<S, ObjectInstance<K, PropertiesOf<Objects[K]>>>,
@@ -222,6 +252,23 @@ export function defineAction<Objects extends ObjectDefinitions, K extends keyof 
   return def
 }
 
+/** A named domain read. It must not perform writes or other side effects. */
+export interface FunctionDef<S extends Properties = Properties, Result = unknown> {
+  description?: string
+  params: S
+  /** Use the caller's actor for all reads; return values, not applied edits. */
+  run: (ctx: { params: z.output<z.ZodObject<S>>; actor: string }) => Result
+}
+
+/**
+ * Infer input params from their schema and the result from the implementation.
+ * Result stays as returned, including Promise results; it is not ActionResult.
+ * The read-only contract above is the author's responsibility, not a sandbox.
+ */
+export function defineFunction<S extends Properties, Result>(def: FunctionDef<S, Result>): FunctionDef<S, Result> {
+  return def
+}
+
 export interface OntologyDef {
   name: string
   objects: ObjectDefinitions
@@ -230,9 +277,20 @@ export interface OntologyDef {
   // defineLink() call inferred — and the model-derived types below need them.
   links: Record<string, LinkTypeDef<any, any>>
   actions: Record<string, ActionDef<any, any>>
+  functions?: Record<string, FunctionDef<any, any>>
 }
 
+/**
+ * Cross-reference checks need the assembled model. Distinct operation names
+ * also let run(name, params) dispatch without asking the caller for a kind.
+ * Returning Model, rather than OntologyDef, keeps its specific names and schemas.
+ */
 export function defineOntology<Model extends OntologyDef>(def: Model): Model {
+  for (const name of Object.keys(def.functions ?? {})) {
+    if (Object.hasOwn(def.actions, name)) {
+      throw new Error(`operation "${name}" is defined as both an action and a function`)
+    }
+  }
   for (const [name, link] of Object.entries(def.links)) {
     for (const end of [link.from, link.to]) {
       if (!Object.hasOwn(def.objects, end)) {
@@ -254,9 +312,22 @@ export function defineOntology<Model extends OntologyDef>(def: Model): Model {
 
 type ObjectDefinitions = Record<string, ObjectTypeDef<any>>
 type PropertiesOf<Definition extends ObjectTypeDef<any>> = z.output<z.ZodObject<Definition['properties']>>
+// Dictionary keys become string literal unions: the editor's name candidates.
+// These types guide TypeScript callers; schemas still validate runtime inputs.
 export type ObjectName<Model extends OntologyDef> = keyof Model['objects'] & string
 export type LinkName<Model extends OntologyDef> = keyof Model['links'] & string
 export type ActionName<Model extends OntologyDef> = keyof Model['actions'] & string
+export type FunctionName<Model extends OntologyDef> = keyof NonNullable<Model['functions']> & string
+export type OperationName<Model extends OntologyDef> = ActionName<Model> | FunctionName<Model>
+/** Select a name first; its definition determines both params and result. */
+export type OperationParamsOf<Model extends OntologyDef, Name extends OperationName<Model>> =
+  Name extends ActionName<Model> ? ParamsOf<Model, Name>
+    : Name extends FunctionName<Model> ? z.input<z.ZodObject<NonNullable<Model['functions']>[Name]['params']>>
+      : never
+export type OperationResultOf<Model extends OntologyDef, Name extends OperationName<Model>> =
+  Name extends ActionName<Model> ? ActionResult
+    : Name extends FunctionName<Model> ? ReturnType<NonNullable<Model['functions']>[Name]['run']>
+      : never
 export type Direction = 'forward' | 'reverse'
 
 /**
@@ -267,11 +338,19 @@ export type Direction = 'forward' | 'reverse'
 export type ObjectOf<Model extends OntologyDef, Name extends ObjectName<Model>> = {
   [TypeName in Name]: ObjectInstance<TypeName, PropertiesOf<Model['objects'][TypeName]>>
 }[Name]
-/** 'cancelOrder' → its input params, e.g. { orderId: string; reason: string }. */
+/**
+ * 'cancelOrder' → its input params, e.g. { orderId: string; reason: string }.
+ * z.input is what callers supply; callbacks receive z.output after parsing.
+ * For example, a defaulted parameter can be omitted by the caller.
+ */
 export type ParamsOf<Model extends OntologyDef, Action extends ActionName<Model>> =
   z.input<z.ZodObject<Model['actions'][Action]['params']>>
 
-/** Customer or Order → 'customerOrders'; Employee → 'manages'. Either endpoint counts. */
+/**
+ * Customer or Order → 'customerOrders'; Employee → 'manages'. Either endpoint counts.
+ * Map each link to its name or never, then index the map to collect its values.
+ * `never` disappears from that union, removing links unrelated to the source.
+ */
 export type LinksFrom<Model extends OntologyDef, Source extends ObjectName<Model>> = {
   [Link in LinkName<Model>]: Source extends Model['links'][Link]['from'] | Model['links'][Link]['to'] ? Link : never
 }[LinkName<Model>]
@@ -290,10 +369,27 @@ export type LinkTarget<Model extends OntologyDef, Source extends ObjectName<Mode
 /**
  * If the allowed directions include both choices, direction is required.
  * Customer + customerOrders → direction?: 'forward'. Employee + manages → direction: Direction.
+ * Checking whether the whole Direction union fits detects the ambiguous case.
+ * This depends on the schema, even when no instances currently have that link.
  */
 export type TraverseOptions<Model extends OntologyDef, Source extends ObjectName<Model>, Link extends LinkName<Model>> =
   { actor: string } & (Direction extends LinkDirections<Model, Source, Link>
     ? { direction: LinkDirections<Model, Source, Link> }
     : { direction?: LinkDirections<Model, Source, Link> })
 
-export type ObjectFilter<Instance extends ObjectInstance> = Partial<Instance['properties']> | ((object: Instance) => boolean)
+/**
+ * One attempted action, applied or rejected — the instance to an ActionDef's
+ * type. Its identity is the occurrence, not the arguments: the same params
+ * submitted twice are two entries. That is why the log only appends.
+ */
+export interface AuditEntry {
+  seq: number
+  ts: string
+  actor: string
+  action: string
+  target: string
+  params: Record<string, unknown>
+  status: 'applied' | 'rejected'
+  error: Violation | null
+  edits: Edit[] | null
+}

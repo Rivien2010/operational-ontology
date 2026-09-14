@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "factory": {
+      "command": "pnpm",
+      "args": ["mcp:factory"],
+      "env": { "OO_AGENT": "factory-demo" }
+    }
+  }
+}

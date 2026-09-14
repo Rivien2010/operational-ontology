@@ -41,8 +41,8 @@ for (const file of ['README.md', 'README.ja.md']) {
       { id: 'O1', status: 'pending', total: 100 },
       { id: 'O2', status: 'shipped', total: 200 },
     ] } })
-    assert.equal(rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor).ok, true)
+    assert.equal(rt.execute('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor).ok, true)
     assert.equal(rt.get('Order', 'O1', actor)!.properties.status, 'cancelled')
-    assert.equal(rt.run('cancelOrder', { orderId: 'O2', reason: 'duplicate' }, actor).ok, false)
+    assert.equal(rt.execute('cancelOrder', { orderId: 'O2', reason: 'duplicate' }, actor).ok, false)
   })
 }

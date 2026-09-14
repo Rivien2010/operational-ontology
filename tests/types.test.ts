@@ -78,7 +78,7 @@ export function compileOnly(rt: Runtime<typeof model>, name: string): void {
   rt.traverse(order, 'manages', actor)
   // @ts-expect-error predicate callbacks retain the properties of an explicit object type
   rt.search('Order', { ...actor, filter: (object) => object.properties.status === 'lost' })
-  rt.run('cancelOrder', { orderId: 'O1' }, actor)
+  rt.execute('cancelOrder', { orderId: 'O1' }, actor)
   rt.preview(name, {}, actor)
   modify(order, { status: 'lost', missing: 1 })
 
@@ -107,17 +107,17 @@ const functionModel = defineOntology({
 })
 
 export function compileOnlyFunctions(rt: Runtime<typeof functionModel>, name: string): void {
-  const labels = rt.run('labels', { prefix: 'order' }, actor)
+  const labels = rt.call('labels', { prefix: 'order' }, actor)
   assertType<Same<typeof labels, string[]>>()
-  const identity = rt.run('whoAmI', {}, actor)
+  const identity = rt.call('whoAmI', {}, actor)
   assertType<Same<typeof identity, Promise<string>>>()
-  const cancelled = rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
+  const cancelled = rt.execute('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
   assertType<Same<typeof cancelled, ActionResult>>()
-  const dynamic = rt.run(name, {}, actor)
+  const dynamic = rt.call(name, {}, actor)
   assertType<Same<typeof dynamic, unknown>>()
   // Argument validation belongs to the model's Zod schemas at runtime.
-  rt.run('labels', { prefix: 'order', count: 'two' }, actor)
-  rt.run('unknownFunction', {}, actor)
+  rt.call('labels', { prefix: 'order', count: 'two' }, actor)
+  rt.call('unknownFunction', {}, actor)
   rt.preview('labels', {}, actor)
 }
 
@@ -149,10 +149,10 @@ test('reads, traversal, callbacks and action targets share the instance shape', 
   const pending = rt.search('Order', { ...actor, filter: (object) => object.properties.status === 'pending' })
   assert.deepEqual(rt.aggregate(pending, { groupBy: 'status', sum: 'total' }).values,
     [{ key: 'pending', pks: ['O1'], count: 1, sum: 100 }])
-  assert.equal(rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor).ok, true)
+  assert.equal(rt.execute('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor).ok, true)
   assert.equal(rt.get('Order', 'O1', actor)!.properties.status, 'cancelled')
   assert.equal(orders[0].properties.status, 'pending', 'an earlier read is a snapshot')
-  assert.equal(rt.run('cancelOrder', { orderId: 'O2', reason: 'duplicate' }, actor).ok, false)
+  assert.equal(rt.execute('cancelOrder', { orderId: 'O2', reason: 'duplicate' }, actor).ok, false)
 })
 
 test('same-type links require direction even at an endpoint with only incoming or outgoing edges', () => {

@@ -24,7 +24,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { objectSet } from './core.js'
-import type { ActionResult, ObjectInstance, Runtime, OntologyDef } from './core.js'
+import type { ObjectInstance, Runtime, OntologyDef } from './core.js'
 import { fieldKind } from './query.js'
 import pkg from '../package.json' with { type: 'json' }
 
@@ -176,7 +176,7 @@ export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, op
     )
   }
 
-  // Invoke Actions through run, preserving the same validation, write-back and
+  // Invoke Actions through execute, preserving the same validation, write-back and
   // audit path as local callers. A business refusal becomes an MCP tool error.
   for (const [actionName, action] of Object.entries(rt.ontology.actions)) {
     server.registerTool(
@@ -189,8 +189,7 @@ export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, op
         inputSchema: action.params,
       },
       guarded(async (params: Record<string, unknown>, extra: { sessionId?: string }) => {
-        // This name was enumerated from actions, so the result is an ActionResult.
-        const result = rt.run(actionName, params, { actor: actorOf(extra) }) as ActionResult
+        const result = rt.execute(actionName, params, { actor: actorOf(extra) })
         if (!result.ok) {
           return { ...asJson({ error: result.error }), isError: true }
         }
@@ -210,7 +209,7 @@ export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, op
         annotations: { readOnlyHint: true },
       },
       guarded(async (params: Record<string, unknown>, extra: { sessionId?: string }) =>
-        asJson(await rt.run(name, params, { actor: actorOf(extra) }))),
+        asJson(await rt.call(name, params, { actor: actorOf(extra) }))),
     )
   }
 

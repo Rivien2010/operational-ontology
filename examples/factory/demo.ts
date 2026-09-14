@@ -24,7 +24,7 @@ try {
   console.log('S1 and S2 converge on C1. C2 is excluded because its L2 was made September 5.')
   console.log('C3 has only an unshipped part of L1. The unrelated L4 packed in S1 is not evidence.')
   console.log('Manufactured units by family:', rt.aggregate(lots, { groupBy: 'family', sum: 'units' }).values)
-  const impact = rt.run('customerImpact', { lotIds: lots.objects.map((lot) => lot.pk) }, { actor })
+  const impact = rt.call('customerImpact', { lotIds: lots.objects.map((lot) => lot.pk) }, { actor })
   console.log('Affected shipped quantities, at shipment-line grain:')
   console.table(impact.aggregation.values)
   const customer = customers.objects[0]
@@ -36,7 +36,7 @@ try {
   }
   console.log('Preview:', rt.preview('createContactTask', request, { actor }))
   console.log('Tasks before execution:', rt.search('ContactTask', { actor }).objects.length)
-  console.log('Create task:', rt.run('createContactTask', request, { actor }))
+  console.log('Create task:', rt.execute('createContactTask', request, { actor }))
   rt.load(integrate(app.sources))
   const task = rt.get('ContactTask', 'CONTACT-C1', { actor })!
   console.log('Saved evidence after source refresh:', rt.traverse(task, 'contactLines', { actor }))

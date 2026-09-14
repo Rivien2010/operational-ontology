@@ -27,7 +27,7 @@ test('finance distinguishes recipient intersection, distinct senders and repeate
     return rt.pivot(transfers, 'incoming', { actor })
   })
   assert.deepEqual(ids(paths.reduce((a, b) => rt.intersect(a, b)).objects), ['X'])
-  const summary = rt.run('recipientSummary', { ...scope, originIds: ['A', 'B', 'C', 'A'] }, { actor })
+  const summary = rt.call('recipientSummary', { ...scope, originIds: ['A', 'B', 'C', 'A'] }, { actor })
   assert.deepEqual(summary.scope.originIds, ['A', 'B', 'C'])
   const x = summary.aggregation.values.find((row) => row.key === 'X')!
   assert.deepEqual(x, { key: 'X', pks: ['X'], senderCount: 3, transactionCount: 4, totalAmount: 5100000 })
@@ -37,10 +37,10 @@ test('finance distinguishes recipient intersection, distinct senders and repeate
   assert.deepEqual(ids(evidence.transfers.objects), ['T1a', 'T1b', 'T3', 'T4'])
   assert.deepEqual(ids(evidence.senders.objects), ['A', 'B', 'C'])
   assert.deepEqual(rt.auditLog(), [])
-  const empty = rt.run('recipientSummary', { ...scope, after: '2027-01-01T00:00:00Z', before: '2027-01-02T00:00:00Z' }, { actor })
+  const empty = rt.call('recipientSummary', { ...scope, after: '2027-01-01T00:00:00Z', before: '2027-01-02T00:00:00Z' }, { actor })
   assert.deepEqual(empty.aggregation.set, { type: 'Account', objects: [] })
-  assert.throws(() => rt.run('recipientSummary', { ...scope, before: scope.after }, { actor }), /after must precede/)
-  assert.throws(() => rt.run('recipientSummary', { ...scope, originIds: ['missing'] }, { actor }), /missing or hidden/)
+  assert.throws(() => rt.call('recipientSummary', { ...scope, before: scope.after }, { actor }), /after must precede/)
+  assert.throws(() => rt.call('recipientSummary', { ...scope, originIds: ['missing'] }, { actor }), /missing or hidden/)
 })
 
 test('finance saves target, scope and evidence as a case; rejects unrelated evidence without partial writes', (t) => {
@@ -50,16 +50,16 @@ test('finance saves target, scope and evidence as a case; rejects unrelated evid
   assert.deepEqual(rt.auditLog(), [])
   assert.deepEqual(rt.search('Investigation', { actor }).objects, [])
   for (const transferIds of [['T2'], ['T8'], ['T9'], ['T10'], ['T1a', 'T1a']]) {
-    assert.equal(rt.run('openInvestigation', { ...request, transferIds }, { actor }).ok, false)
+    assert.equal(rt.execute('openInvestigation', { ...request, transferIds }, { actor }).ok, false)
   }
   const invalidScopes: Array<[Partial<typeof request>, string]> = [[{ before: scope.after }, 'INVALID_WINDOW'], [{ originIds: ['missing'] }, 'ORIGIN_MISSING']]
   for (const [change, code] of invalidScopes) {
-    const result = rt.run('openInvestigation', { ...request, ...change }, { actor })
+    const result = rt.execute('openInvestigation', { ...request, ...change }, { actor })
     assert.equal(result.ok, false)
     if (!result.ok) assert.equal(result.error.code, code)
   }
   assert.deepEqual(rt.search('Investigation', { actor }).objects, [])
-  assert.equal(rt.run('openInvestigation', request, { actor }).ok, true)
+  assert.equal(rt.execute('openInvestigation', request, { actor }).ok, true)
   assert.deepEqual(sources, original)
   rt.load(integrate(sources))
   const saved = rt.get('Investigation', 'CASE-X', { actor })!
@@ -75,7 +75,7 @@ test('finance rechecks evidence relationships after a source correction', (t) =>
   assert.equal(rt.preview('openInvestigation', request, { actor }).ok, true)
   sources.transfers[0].recipient_id = 'Y'
   rt.load(integrate(sources))
-  const result = rt.run('openInvestigation', request, { actor })
+  const result = rt.execute('openInvestigation', request, { actor })
   assert.equal(result.ok, false)
   if (!result.ok) assert.equal(result.error.code, 'INVALID_EVIDENCE')
   assert.equal(rt.get('Investigation', 'CASE-X', { actor }), undefined)

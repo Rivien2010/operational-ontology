@@ -135,7 +135,7 @@ const ontology = defineOntology({
 })
 ```
 
-Calling `run('cancelOrder', …)` loads the target and checks the rule. For an allowed write, the runtime validates the edit plan, writes it back, then commits the local edits and audit entry. The effects function only describes changes; the adapter performs the external write.
+Calling `execute('cancelOrder', …)` loads the target and checks the rule. For an allowed write, the runtime validates the edit plan, writes it back, then commits the local edits and audit entry. The effects function only describes changes; the adapter performs the external write.
 
 <img src="./assets/action-gate.svg" alt="Every caller — human or AI agent — invokes the named action cancelOrder through the same governed gate. The precondition refuses shipped orders with a machine-readable error; an applied call transitions the status. Every attempt, applied or refused, lands in the audit log. A generic UPDATE path is absent by design.">
 
@@ -159,7 +159,7 @@ Start with the first three files; use the others to follow a particular part of 
 | --- | --- |
 | [`examples/orders/ontology.ts`](./examples/orders/ontology.ts) | The business model: objects, relationships, ownership, and action rules. |
 | [`examples/orders/demo.ts`](./examples/orders/demo.ts) | A caller exercising reads, successful writes, refusals, and re-indexing. |
-| [`src/core.ts`](./src/core.ts) | The interpreter: follow the Action branch of `run()` through validation, write-back, and audit. |
+| [`src/core.ts`](./src/core.ts) | The interpreter: follow `execute()` through validation, write-back, and audit. |
 | [`src/model.ts`](./src/model.ts) | The definition helpers, instance shapes, and edit plans. |
 | [`src/query.ts`](./src/query.ts) | Evaluated sets, filtering, set algebra, and aggregation. |
 | [`src/store.ts`](./src/store.ts) | SQLite indexing, integrity, owned edits, and atomic local commits. |

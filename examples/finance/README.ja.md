@@ -40,7 +40,7 @@
 A から X への170万円を2件の取引に分け、取引件数と送金元数が異なることを示します。期間より前の取引や D からの取引も置き、それらが合計に混ざらないことを確かめます。期間は `after <= occurredAt < before` の半開区間です。
 
 ```ts
-const summary = rt.run('recipientSummary', {
+const summary = rt.call('recipientSummary', {
   originIds: ['A', 'B', 'C'],
   after: '2026-09-08T12:00:00+09:00', before: '2026-09-09T00:00:00+09:00',
 }, { actor })

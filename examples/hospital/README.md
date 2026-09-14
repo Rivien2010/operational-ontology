@@ -30,9 +30,9 @@ For P1, `bedSearch` returns a Bed ObjectSet plus assessments of all beds in the 
 After selecting B101, `nurseSearch` returns N1. N2 has no slot; N3 is on the night shift. Both Functions return `{ set, assessments }`; each assessment includes the object and all applicable `{ code, message }` reasons. Selection and Function calls do not create links, reserve resources or write audit entries.
 
 ```ts
-const beds = rt.run('bedSearch', { patientId: 'P1' }, { actor })
+const beds = rt.call('bedSearch', { patientId: 'P1' }, { actor })
 const bed = beds.set.objects[0]
-const nurses = rt.run('nurseSearch', { patientId: 'P1', bedId: bed.pk }, { actor })
+const nurses = rt.call('nurseSearch', { patientId: 'P1', bedId: bed.pk }, { actor })
 ```
 
 The model shares its patient, bed and nurse evaluation functions with `allocate`. A complete Action can be previewed, then executed. It rechecks the selected combination and commits one ontology-owned Allocation plus its three links atomically. Patient/bed/nurse references are represented by those links, not duplicated in foreign-key properties.

@@ -62,30 +62,30 @@ console.log('  as user:hq:         ', rt.search('Order', hq).objects.map((o) => 
 
 // ── 4. Write side: every change is an action ────────────────────────────
 h('4. Write: an allowed action')
-console.log('assignOrder(N-A-1002 → alice):', rt.run('assignOrder', { orderId: 'N-A-1002', assignee: 'alice' }, { actor: 'user:hq' }))
+console.log('assignOrder(N-A-1002 → alice):', rt.execute('assignOrder', { orderId: 'N-A-1002', assignee: 'alice' }, { actor: 'user:hq' }))
 
 h('5. Write: a business rule refuses')
-const refused = rt.run('cancelOrder', { orderId: 'N-A-1001', reason: 'customer changed their mind' }, { actor: 'user:hq' })
+const refused = rt.execute('cancelOrder', { orderId: 'N-A-1001', reason: 'customer changed their mind' }, { actor: 'user:hq' })
 console.log('cancelOrder(N-A-1001) →', JSON.stringify(refused, null, 2))
 console.log('(N-A-1001 already shipped — the rule lives in the model, so every caller meets the same refusal)')
 
 h('6. Write: an allowed cancel reaches the system of record')
 const before = legacy.south.prepare("SELECT ORDER_ID, ORDER_STATUS FROM SALES_ORDER WHERE ORDER_ID = 'SO-77'").get()
 console.log('south.SALES_ORDER before:', before)
-console.log('cancelOrder(S-SO-77):', rt.run('cancelOrder', { orderId: 'S-SO-77', reason: 'duplicate order' }, { actor: 'user:hq' }).ok ? 'applied' : 'rejected')
+console.log('cancelOrder(S-SO-77):', rt.execute('cancelOrder', { orderId: 'S-SO-77', reason: 'duplicate order' }, { actor: 'user:hq' }).ok ? 'applied' : 'rejected')
 const after = legacy.south.prepare("SELECT ORDER_ID, ORDER_STATUS FROM SALES_ORDER WHERE ORDER_ID = 'SO-77'").get()
 console.log('south.SALES_ORDER after: ', after, ' ← write-back reached the legacy system')
 
 // ── 7. Failure semantics: write-back-first, observable ──────────────────
 h('7. Write: the source refuses a stale write (write-back-first)')
 legacy.south.prepare("UPDATE SALES_ORDER SET ORDER_STATUS = 'SHIPPED' WHERE ORDER_ID = 'SO-79'").run()
-const stale = rt.run('cancelOrder', { orderId: 'S-SO-79', reason: 'no longer needed' }, { actor: 'user:hq' })
+const stale = rt.execute('cancelOrder', { orderId: 'S-SO-79', reason: 'no longer needed' }, { actor: 'user:hq' })
 console.log("the ERP shipped SO-79 behind the ontology's back; cancelOrder(S-SO-79) →", JSON.stringify(stale, null, 2))
 console.log(`status here is still "${rt.get('Order', 'S-SO-79', hq)!.properties.status}" — write-back ran first, the source refused, nothing changed locally`)
 
 // ── 8. Re-indexing: the sources move on, the ontology's own state survives ──
 h('8. Re-index: ontology-owned state survives, source truth refreshes')
-rt.run('addOrderNote', { orderId: 'N-A-1002', noteId: 'NOTE-1', text: 'audit all N- orders before the north system sunsets', author: 'hq-ops' }, { actor: 'user:hq' })
+rt.execute('addOrderNote', { orderId: 'N-A-1002', noteId: 'NOTE-1', text: 'audit all N- orders before the north system sunsets', author: 'hq-ops' }, { actor: 'user:hq' })
 rt.load(integrate(legacy)) // the pipeline runs again over the live legacy systems
 const reindexed = rt.get('Order', 'N-A-1002', hq)!
 console.log(`assignee of N-A-1002:  ${reindexed.properties.assignee}  ← ontology-owned, survived the re-index`)

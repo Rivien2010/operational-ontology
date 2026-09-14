@@ -33,7 +33,7 @@ import * as query from './query.js'
 import type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter } from './query.js'
 import type {
   ActionCtx, ActionDef, ActionResult, AuditEntry, Edit, ObjectInstance,
-  ObjectOf, OntologyDef, TraverseOptions, Violation, OperationResultOf,
+  ObjectOf, OntologyDef, TraverseOptions, Violation, FunctionResultOf,
 } from './model.js'
 export * from './model.js'
 export { objectSet, aggregationResult } from './query.js'
@@ -86,7 +86,7 @@ export const declarations = {
 } as const
 
 /**
- * Interpret one model. Model is kept only for simple get/search/run result
+ * Interpret one model. Model is kept only for simple get/search/call result
  * lookups; operation inputs use strings and plain data, checked at runtime.
  * Store holds ontology state separately from the indexed source systems.
  */
@@ -194,20 +194,18 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return query.objectSet(target, objects)
   }
 
-  /**
-   * One entry point for named operations; only actions pass through the write gate.
-   * The supplied schema checks params. A Function's result passes
-   * through as defined, including a Promise; Action execution is synchronous.
-   */
-  run<Name extends string>(
+  /** Apply an Action through the write gate; refusals are audited too. */
+  execute(actionName: string, params: Record<string, unknown>, opts: { actor: string }): ActionResult {
+    return this.#runAction(actionName, params, opts, 'execute')
+  }
+
+  /** Validate Function params and return its value, including a Promise. Reads are not audited. */
+  call<Name extends string>(
     name: Name, params: Record<string, unknown>, opts: { actor: string },
-  ): OperationResultOf<Model, Name> {
-    if (Object.hasOwn(this.ontology.actions, name)) {
-      return this.#runAction(name, params, opts, 'run') as OperationResultOf<Model, Name>
-    }
+  ): FunctionResultOf<Model, Name> {
     const functions = this.ontology.functions
     const fn = functions && Object.hasOwn(functions, name) ? functions[name] : undefined
-    if (!fn) throw new Error(`unknown operation "${name}"`)
+    if (!fn) throw new Error(`unknown function "${name}"`)
     return fn.run({ params: z.object(fn.params).parse(params), actor: opts.actor })
   }
 
@@ -225,7 +223,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
    * is INVALID_EDITS, whatever else it is.
    */
   #runAction(
-    actionName: string, params: unknown, opts: { actor: string }, mode: 'run' | 'preview',
+    actionName: string, params: unknown, opts: { actor: string }, mode: 'execute' | 'preview',
   ): ActionResult {
     this.#store.refuseOpenTransaction(mode)
     // From here on the params are raw input: the schema, not the type, decides.
@@ -237,7 +235,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       error: Violation,
       edits?: Edit[],
     ): ActionResult => {
-      if (mode === 'run') this.#store.audit({
+      if (mode === 'execute') this.#store.audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -284,7 +282,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
 
     // Execution crashes are audited as EXECUTION_CRASHED. Both modes rethrow.
     const crashed = (e: unknown): never => {
-      if (mode === 'run') this.#store.audit({
+      if (mode === 'execute') this.#store.audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -373,7 +371,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       return refuse(reject('NO_WRITEBACK_ADAPTER', 'action requires write-back but no adapter is configured'))
     }
     // Preview is a snapshot of local validity, not a reservation or a source
-    // acknowledgement. run() runs these checks again against current state.
+    // acknowledgement. execute() runs these checks again against current state.
     if (mode === 'preview') return { ok: true, edits }
 
     // An empty plan changes nothing, so there is nothing to write back —

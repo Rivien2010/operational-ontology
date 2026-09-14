@@ -41,10 +41,10 @@ test('factory investigates a supplied manufacturing window and records shipped-l
   assert.deepEqual(rt.auditLog(), [])
   assert.equal(rt.search('ContactTask', { actor }).objects.length, 0)
   for (const lineIds of [['SL2'], ['SL5'], ['SL6'], ['SL1', 'SL1']]) {
-    assert.equal(rt.run('createContactTask', { ...params, lineIds }, { actor }).ok, false)
+    assert.equal(rt.execute('createContactTask', { ...params, lineIds }, { actor }).ok, false)
   }
   assert.equal(rt.search('ContactTask', { actor }).objects.length, 0)
-  assert.equal(rt.run('createContactTask', params, { actor }).ok, true)
+  assert.equal(rt.execute('createContactTask', params, { actor }).ok, true)
   rt.load(integrate(sources))
   const task = rt.get('ContactTask', 'TASK1', { actor })!
   assert.deepEqual(ids(rt.traverse(task, 'contactLots', { actor }).objects), ['L1', 'L3'])
@@ -58,13 +58,13 @@ test('factory impact counts affected line quantities once across converging path
   const equipment = rt.filter(rt.search('Equipment', { actor }), (object) => ['PRESS-1', 'OVEN-1'].includes(object.properties.id as string))
   const lots = rt.pivot(equipment, 'producedOn', { actor })
   assert.deepEqual(ids(lots.objects), ['L1', 'L2', 'L3'])
-  const impact = rt.run('customerImpact', { lotIds: [...ids(lots.objects), 'L1'] }, { actor })
+  const impact = rt.call('customerImpact', { lotIds: [...ids(lots.objects), 'L1'] }, { actor })
   assert.deepEqual(impact.aggregation.values, [
     { key: 'C1', pks: ['C1'], affectedUnits: 50, shipmentCount: 2 },
     { key: 'C2', pks: ['C2'], affectedUnits: 15, shipmentCount: 1 },
   ])
   assert.deepEqual(ids(impact.evidence[0].lines.objects), ['SL1', 'SL3', 'SL4'])
-  assert.deepEqual(rt.run('customerImpact', { lotIds: [] }, { actor }).aggregation.set, { type: 'Customer', objects: [] })
+  assert.deepEqual(rt.call('customerImpact', { lotIds: [] }, { actor }).aggregation.set, { type: 'Customer', objects: [] })
   assert.deepEqual(rt.auditLog(), [])
 })
 
@@ -73,7 +73,7 @@ for (const status of ['pending', 'held']) {
     const { rt, sources } = setup(t)
     sources.wms.prepare('UPDATE shipment SET status = ?, shipped_at = NULL WHERE id = ?').run(status, 'S2')
     rt.load(integrate(sources))
-    const impact = rt.run('customerImpact', { lotIds: ['L1', 'L3'] }, { actor })
+    const impact = rt.call('customerImpact', { lotIds: ['L1', 'L3'] }, { actor })
     assert.deepEqual(impact.aggregation.values, [
       { key: 'C1', pks: ['C1'], affectedUnits: 10, shipmentCount: 1 },
     ])
@@ -83,16 +83,16 @@ for (const status of ['pending', 'held']) {
       after: '2026-09-06T00:00:00+09:00', before: '2026-09-07T00:00:00+09:00',
       lineIds: ids(impact.evidence[0].lines.objects),
     }
-    assert.equal(rt.run('createContactTask', request, { actor }).ok, true)
+    assert.equal(rt.execute('createContactTask', request, { actor }).ok, true)
     assert.deepEqual(ids(rt.traverse(rt.get('ContactTask', 'CONTACT', { actor })!, 'contactLines', { actor }).objects), ['SL1'])
 
     sources.wms.prepare('UPDATE shipment SET status = ?, shipped_at = NULL WHERE id = ?').run(status, 'S1')
     rt.load(integrate(sources))
-    const none = rt.run('customerImpact', { lotIds: ['L1', 'L3'] }, { actor })
+    const none = rt.call('customerImpact', { lotIds: ['L1', 'L3'] }, { actor })
     assert.deepEqual(none.aggregation.set, { type: 'Customer', objects: [] })
     assert.deepEqual(none.aggregation.values, [])
     assert.deepEqual(none.evidence, [])
-    const stale = rt.run('createContactTask', { ...request, taskId: 'STALE' }, { actor })
+    const stale = rt.execute('createContactTask', { ...request, taskId: 'STALE' }, { actor })
     assert.equal(stale.ok, false)
     if (!stale.ok) assert.equal(stale.error.code, 'INVALID_EVIDENCE')
     assert.equal(rt.get('ContactTask', 'STALE', { actor }), undefined)

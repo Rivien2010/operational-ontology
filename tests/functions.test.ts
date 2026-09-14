@@ -24,12 +24,17 @@ test('model functions validate inputs before running, pass the actor, and do not
       broken: defineFunction({ params: {}, run: () => { throw new Error('function crashed') } }),
     },
   }), db)
-  assert.deepEqual(rt.run('label', { prefix: 'x' }, { actor: 'user:alice' }), { label: 'x', actor: 'user:alice' })
-  assert.throws(() => rt.run('label', { prefix: '', count: 2 }, { actor: 'user:bob' }), z.ZodError)
+  assert.deepEqual(rt.call('label', { prefix: 'x' }, { actor: 'user:alice' }), { label: 'x', actor: 'user:alice' })
+  assert.throws(() => rt.call('label', { prefix: '', count: 2 }, { actor: 'user:bob' }), z.ZodError)
   assert.deepEqual(observed, ['user:alice'], 'invalid params must not reach model code')
-  assert.throws(() => rt.run('broken', {}, { actor: 'user:alice' }), /function crashed/)
-  assert.throws(() => rt.run('toString', {}, { actor: 'user:alice' }), /unknown operation/)
+  assert.throws(() => rt.call('broken', {}, { actor: 'user:alice' }), /function crashed/)
+  assert.throws(() => rt.call('toString', {}, { actor: 'user:alice' }), /unknown function/)
   assert.deepEqual(rt.auditLog(), [])
+  const refused = rt.execute('label', { prefix: 'do not call' }, { actor: 'user:alice' })
+  assert.equal(refused.ok, false)
+  if (!refused.ok) assert.equal(refused.error.code, 'UNKNOWN_ACTION')
+  assert.deepEqual(observed, ['user:alice'], 'execute must not invoke a Function')
+  assert.deepEqual(rt.auditLog().map((entry) => entry.error?.code), ['UNKNOWN_ACTION'])
 })
 
 test('action and function names must be unambiguous, including models passed directly to the runtime', (t) => {

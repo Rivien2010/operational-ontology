@@ -193,7 +193,7 @@ export interface ActionCtx<O = ObjectInstance, P = Record<string, unknown>> {
 }
 
 /**
- * The schema side of an action — its type. Each `run()` of this action is one
+ * The schema side of an action — its type. Each `execute()` of this action is one
  * instance of it, applied or refused, recorded as an audit entry.
  */
 export interface ActionDef<S extends Properties = Properties, O extends ObjectInstance = ObjectInstance> {
@@ -273,7 +273,7 @@ export interface OntologyDef {
 
 /**
  * Cross-reference checks need the assembled model. Distinct operation names
- * also let run(name, params) dispatch without asking the caller for a kind.
+ * keep the generated MCP tools unambiguous across Actions and Functions.
  * Returning Model, rather than OntologyDef, keeps its specific names and schemas.
  */
 export function defineOntology<Model extends OntologyDef>(def: Model): Model {
@@ -303,10 +303,8 @@ type ObjectDefinitions = Record<string, ObjectTypeDef<any>>
 type PropertiesOf<Definition extends ObjectTypeDef<any>> = z.output<z.ZodObject<Definition['properties']>>
 export type ObjectOf<Model extends OntologyDef, Name extends string> =
   Name extends keyof Model['objects'] ? ObjectInstance<Name, PropertiesOf<Model['objects'][Name]>> : ObjectInstance
-export type OperationResultOf<Model extends OntologyDef, Name extends string> =
-  Name extends keyof Model['actions'] ? ActionResult
-    : Name extends keyof NonNullable<Model['functions']> ? ReturnType<NonNullable<Model['functions']>[Name]['run']>
-      : unknown
+export type FunctionResultOf<Model extends OntologyDef, Name extends string> =
+  Name extends keyof NonNullable<Model['functions']> ? ReturnType<NonNullable<Model['functions']>[Name]['run']> : unknown
 export type Direction = 'forward' | 'reverse'
 /** Omit direction when only one end fits; Runtime rejects ambiguous or impossible choices. */
 export interface TraverseOptions { actor: string; direction?: Direction }

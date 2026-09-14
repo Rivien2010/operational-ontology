@@ -19,7 +19,7 @@ try {
   const common = paths.map((p) => p.recipients).reduce((a, b) => rt.intersect(a, b))
   console.log('Common to every origin:', common.objects.map((a) => a.pk))
 
-  const summary = rt.run('recipientSummary', scope, { actor })
+  const summary = rt.call('recipientSummary', scope, { actor })
   console.table(summary.aggregation.values)
   const selected = rt.filter(summary.aggregation, (row) => (row.senderCount as number) >= 2)
   console.log('At least two distinct senders:', selected.set.objects.map((a) => a.pk))
@@ -34,7 +34,7 @@ try {
     reason: 'Request invoices and payment purposes for the common recipient; a legitimate explanation remains possible',
   }
   console.log('Preview:', rt.preview('openInvestigation', request, { actor }))
-  console.log('Create case:', rt.run('openInvestigation', request, { actor }))
+  console.log('Create case:', rt.execute('openInvestigation', request, { actor }))
   rt.load(integrate(app.sources))
   const saved = rt.get('Investigation', 'CASE-X', { actor })!
   console.log('Evidence after source refresh:', rt.traverse(saved, 'investigationTransfers', { actor }))

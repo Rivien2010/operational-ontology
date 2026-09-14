@@ -135,7 +135,7 @@ const ontology = defineOntology({
 })
 ```
 
-`run('cancelOrder', …)` を呼ぶと、対象を読み込み、ルールを検査します。受理する場合は編集プランを検証してソースへ書き戻し、ローカルの編集と監査エントリをコミットします。effects 関数は変更を記述するだけで、外部への書き込みはアダプタが担当します。
+`execute('cancelOrder', …)` を呼ぶと、対象を読み込み、ルールを検査します。受理する場合は編集プランを検証してソースへ書き戻し、ローカルの編集と監査エントリをコミットします。effects 関数は変更を記述するだけで、外部への書き込みはアダプタが担当します。
 
 <img src="./assets/action-gate.svg" alt="人間も AI エージェントも、同じ統制されたゲートを通って名前付きアクション cancelOrder を呼び出す。事前条件は出荷済み注文を機械可読なエラーで拒否し、適用された呼び出しはステータスを遷移させる。適用も拒否も、すべての試行が監査ログに残る。汎用の UPDATE 経路は設計上存在しない。">
 
@@ -159,7 +159,7 @@ https://github.com/user-attachments/assets/2b811ee7-bff2-4694-b3bf-bf0f6ccc85d5
 | --- | --- |
 | [`examples/orders/ontology.ts`](./examples/orders/ontology.ts) | オブジェクト・関係・所有・アクションのルールという業務モデル。 |
 | [`examples/orders/demo.ts`](./examples/orders/demo.ts) | 読み取り、書き込みの成功と拒否、再インデックスを呼び出し側から確認する。 |
-| [`src/core.ts`](./src/core.ts) | モデルの実行処理。`run()` の Action 側から検証・書き戻し・監査を辿る。 |
+| [`src/core.ts`](./src/core.ts) | モデルの実行処理。`execute()` から検証・書き戻し・監査を辿る。 |
 | [`src/model.ts`](./src/model.ts) | 定義用の関数、インスタンスの形、編集プラン。 |
 | [`src/query.ts`](./src/query.ts) | 取得済みの集合、filter、集合演算、集計。 |
 | [`src/store.ts`](./src/store.ts) | SQLite へのインデックス、整合性検査、所有する編集、ローカルの原子的コミット。 |

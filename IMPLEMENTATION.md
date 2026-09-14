@@ -13,7 +13,7 @@ The public entry point remains `Runtime`; the implementation follows the respons
 | File | Responsibility |
 | --- | --- |
 | `model.ts` | Definition helpers, instance shapes and edit plans. |
-| `core.ts` | Actor-scoped reads, the public query methods, `run` / `preview`, and the Action gate. |
+| `core.ts` | Actor-scoped reads, the public query methods, `execute` / `call` / `preview`, and the Action gate. |
 | `query.ts` | Pure operations on evaluated sets and aggregations, using caller-supplied predicates. |
 | `store.ts` | Concrete SQLite storage, indexing, integrity checks, edits and atomic local audit commits. |
 | `mcp.ts` | Generate tools from the model and adapt inputs to the same runtime operations. |
@@ -36,7 +36,7 @@ console.log(orders.objects[0].properties.status)
 
 This branch simplifies TypeScript contracts to make the implementation easier to read. Input names are strings, operation params and edit properties are plain records, and filters are TypeScript predicates. The runtime checks model-specific names, values and relationships. The editor does not guide callers from an object to its links, directions or valid conditions.
 
-Basic data shapes, readonly identities and model-author callback types remain. A small result lookup also remains: a literal name in `get`, `search` or `run` determines its result type. Keep the inferred model definition for this lookup; an explicit `OntologyDef` annotation erases its specific schemas. A dynamic object name returns common instances with `unknown` property values; a dynamic operation name returns `unknown`. `traverse`, `pivot` and set algebra return the common `ObjectSet` shape. Business code that needs concrete properties after traversal must narrow or assert their types; an assertion does not validate a value.
+Basic data shapes, readonly identities and model-author callback types remain. A small result lookup also remains: a literal name in `get`, `search` or `call` determines its result type. Keep the inferred model definition for this lookup; an explicit `OntologyDef` annotation erases its specific schemas. A dynamic object name returns common instances with `unknown` property values; a dynamic Function name returns `unknown`. `traverse`, `pivot` and set algebra return the common `ObjectSet` shape. Business code that needs concrete properties after traversal must narrow or assert their types; an assertion does not validate a value.
 
 `traverse(source, linkName, { actor, direction? })` accepts a full instance, with no primary-key-only or reference-only overload. The link definition determines direction.
 
@@ -143,7 +143,7 @@ Over MCP stdio, callers share one actor. `OO_AGENT=<name> pnpm mcp` labels it as
 
 ## Running named operations
 
-`run(name, params, { actor })` accepts a string name and a params record. The runtime looks up the Action or Function and validates its input schema. A literal name retains result inference: Actions return `ActionResult`, while Functions return their implementation's result, including a Promise for an async function. Wrong parameter names or values compile but fail runtime validation. `defineOntology()` and runtime construction reject names shared by an Action and a Function. An unknown operation name throws before dispatch and creates no audit entry.
+`execute(actionName, params, { actor })` applies an Action; `call(functionName, params, { actor })` invokes a Function. Both accept string names and plain params records, with inputs checked against the model schema at runtime. `execute` always returns `ActionResult`; unknown Action names are refused as `UNKNOWN_ACTION` and audited. `call` preserves the implementation's result type for literal names, including Promises, and throws for unknown Function names. Neither method dispatches to the other kind. Shared Action/Function names remain invalid to keep generated MCP tool names unambiguous.
 
 This replaces `execute()` and the separate Function `call()` entry point; neither remains as an alias. Dynamic callers that previously received an audited `UNKNOWN_ACTION` refusal from `execute()` now receive an exception for an unknown name. Refusals for known Actions remain audited.
 
@@ -151,7 +151,7 @@ This replaces `execute()` and the separate Function `call()` entry point; neithe
 
 An action definition must include `preconditions`, using `[]` when there are none. Because business rules at the action govern the write path, having no conditions must also be an explicit decision by the model's author.
 
-`run(actionName, params, { actor })` follows this order:
+`execute(actionName, params, { actor })` follows this order:
 
 1. Validate params and load the target under the actor's visibility policy.
 2. Evaluate preconditions.
@@ -167,9 +167,9 @@ Effects describe changes as data and must be pure. `modify` changes properties, 
 
 `preview(actionName, params, { actor })` shares the execution gate through step 5 and checks that a required write-back adapter exists. It returns `{ ok: true, edits }` or the same local refusal as execution. Its dry run rolls back; it performs no write-back, commits no edits, and records no audit entry, including on refusals and exceptions. Preconditions and effects must not perform side effects. Preview does not reserve resources or ask the source to accept a write. Running the Action re-evaluates current state and the adapter may still refuse a stale source write.
 
-Models may register named reads in `functions` using `defineFunction({ description, params, run })`. For a Function name, `rt.run(name, params, { actor })` validates the parameter schema and calls `run({ params, actor })`. The model author's callback receives schema-derived params; callers supply a plain record and receive the implementation's result type when using a literal name. Functions return their values directly. Invalid params, unknown names, and implementation errors throw; calls do not enter the action audit log. MCP generates a tool from each definition, with the same input schema and session actor, and marks it with `readOnlyHint`. It awaits asynchronous results and reports caught exceptions as `INTERNAL` errors.
+Models may register named reads in `functions` using `defineFunction({ description, params, run })`. For a Function name, `rt.call(name, params, { actor })` validates the parameter schema and calls `run({ params, actor })`. The model author's callback receives schema-derived params; callers supply a plain record and receive the implementation's result type when using a literal name. Functions return their values directly. Invalid params, unknown names, and implementation errors throw; calls do not enter the action audit log. MCP generates a tool from each definition, with the same input schema and session actor, and marks it with `readOnlyHint`. It awaits asynchronous results and reports caught exceptions as `INTERNAL` errors.
 
-For example, `rt.run('customerImpact', { lotIds: ['L1'] }, { actor })` returns a customer aggregation and its shipped-line evidence. The factory model owns the search procedure; the caller supplies the lots and uses the result. Functions can also implement domain reads without an associated Action.
+For example, `rt.call('customerImpact', { lotIds: ['L1'] }, { actor })` returns a customer aggregation and its shipped-line evidence. The factory model owns the search procedure; the caller supplies the lots and uses the result. Functions can also implement domain reads without an associated Action.
 
 Function implementations must use the caller's actor for their reads and must not perform writes or other side effects. This is a model-author contract, like pure preconditions and effects, not an enforced sandbox. The examples inject a getter for typed read methods in `runtime.ts`; rules and functions use those methods after runtime construction. No new read API is added to `ActionCtx`.
 
@@ -261,3 +261,5 @@ The API has changed since v0.3: object reads and `meta.target` use `{ type, pk, 
 For the set API migration: replace array access on `search` / `traverse` with `.objects`, use `pivot` for sets, and replace filter conditions with predicate callbacks. Aggregation now takes an ObjectSet and a property-based `groupBy`, with optional numeric `sum`, and returns `{ set, columns, values }`; link-based or custom metrics belong in model Functions. The older array-return and callback-aggregation forms are not retained as overloads.
 
 For this branch's type simplification, `TraverseOptions` no longer takes model parameters, and `AggregationResult<O>` no longer takes metric names. Model-dependent name, parameter and link-navigation aliases are removed. Model-specific operation inputs are checked at runtime. Filter clauses and the `Where` type are removed: use local predicates. MCP `search_*` takes `{}`, `aggregate_*` no longer takes `where`, and `filter_*` tools are removed. Move filtering to client-side code and pass selected IDs to subsequent tools.
+
+The unified `run` method is removed: use `execute` for Actions and `call` for Functions. `preview` remains the Action planning method. The callback inside a Function definition is still named `run`. The result type alias changes from `OperationResultOf` to `FunctionResultOf`.

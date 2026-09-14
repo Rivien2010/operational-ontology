@@ -29,7 +29,7 @@ export type {
   ActionDef,
   ActionCtx,
   FunctionDef,
-  OperationResultOf,
+  FunctionResultOf,
   OntologyDef,
   Direction,
   ObjectOf,

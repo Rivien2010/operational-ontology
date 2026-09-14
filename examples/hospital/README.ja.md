@@ -30,9 +30,9 @@ P1 に対する `bedSearch` は、病床の ObjectSet と、同じ病院の全�
 B101 を選んだ後の `nurseSearch` は N1 を返します。N2 は枠がなく、N3 は夜勤です。両 Function は `{ set, assessments }` を返し、各評価には対象と、該当するすべての `{ code, message }` の理由が入ります。選択や Function 呼び出しでは、リンクの作成、資源の予約、監査の追記はしません。
 
 ```ts
-const beds = rt.run('bedSearch', { patientId: 'P1' }, { actor })
+const beds = rt.call('bedSearch', { patientId: 'P1' }, { actor })
 const bed = beds.set.objects[0]
-const nurses = rt.run('nurseSearch', { patientId: 'P1', bedId: bed.pk }, { actor })
+const nurses = rt.call('nurseSearch', { patientId: 'P1', bedId: bed.pk }, { actor })
 ```
 
 患者・病床・看護師の評価関数を、モデル内で `allocate` と共有します。入力がすべて揃った Action は preview してから実行できます。選択した組み合わせを再検査し、ontology-owned な Allocation と3本のリンクを原子的に作ります。患者・病床・看護師への参照はリンクに置き、外部キー属性として重複させません。

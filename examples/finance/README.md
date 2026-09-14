@@ -40,7 +40,7 @@ Intersecting all three sets yields X. X was not specified as a target at the sta
 A's 1,700,000 yen to X is split into two transfers. This makes transaction count and sender count visibly different. Additional records before the time window and from D must not inflate the totals. The model uses a half-open interval: `after <= occurredAt < before`.
 
 ```ts
-const summary = rt.run('recipientSummary', {
+const summary = rt.call('recipientSummary', {
   originIds: ['A', 'B', 'C'],
   after: '2026-09-08T12:00:00+09:00', before: '2026-09-09T00:00:00+09:00',
 }, { actor })

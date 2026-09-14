@@ -102,7 +102,7 @@ test('MCP combines a dated pivot, custom Function metrics, metric filtering and 
     { property: 'occurredAt', op: 'gte', value: scope.after }, { property: 'occurredAt', op: 'lt', value: scope.before },
   ] })
   assert.equal(afternoon.objects.length, 8)
-  const summary = await call<{ aggregation: AggregationResult<ObjectOf<Finance, 'Account'>, 'senderCount' | 'transactionCount' | 'totalAmount'> }>('recipient_summary', scope)
+  const summary = await call<{ aggregation: AggregationResult<ObjectOf<Finance, 'Account'>> }>('recipient_summary', scope)
   const selected = await call<typeof summary.aggregation>('filter_account', {
     source: summary.aggregation, where: [{ property: 'senderCount', op: 'gte', value: 2 }],
   })

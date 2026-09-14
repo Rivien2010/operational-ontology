@@ -69,7 +69,7 @@ export function createFinanceOntology(read: () => Read) {
             evidence.map((row) => ({
               key: row.accountId, pks: [row.accountId], senderCount: row.senders.objects.length,
               transactionCount: row.transfers.objects.length,
-              totalAmount: row.transfers.objects.reduce((sum, t) => sum + t.properties.amount, 0),
+              totalAmount: row.transfers.objects.reduce((sum, t) => sum + (t.properties.amount as number), 0),
             })))
           return { aggregation, evidence, scope: { ...params, originIds: origins.objects.map((a) => a.pk) } }
         },

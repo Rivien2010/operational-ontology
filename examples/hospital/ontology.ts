@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import {
   create, defineAction, defineFunction, defineLink, defineObject, defineOntology, link, objectSet, reject,
-  type ObjectOf, type Runtime, type Violation,
+  type ObjectOf, type ObjectSet, type Runtime, type Violation,
 } from '../../src/core.js'
 
 const objects = {
@@ -100,7 +100,8 @@ export function createHospitalOntology(read: () => Read) {
         params: { patientId: z.string() },
         run: ({ params, actor }) => {
           const patient = patientInput(params.patientId, actor)
-          const beds = read().pivot(hospitalOf(patient, actor), 'hospitalBeds', { actor })
+          // The declared hospitalBeds link leads to schema-validated Bed instances.
+          const beds = read().pivot(hospitalOf(patient, actor), 'hospitalBeds', { actor }) as ObjectSet<Bed>
           const assessments = beds.objects.map((object) => ({ object, reasons: bedReasons(patient, object, actor) }))
           return { set: objectSet('Bed', assessments.filter((a) => !a.reasons.length).map((a) => a.object)), assessments }
         },
@@ -112,7 +113,7 @@ export function createHospitalOntology(read: () => Read) {
           const patient = patientInput(params.patientId, actor)
           const bed = read().get('Bed', params.bedId, { actor })
           if (!bed) throw new Error('Bed is missing or hidden')
-          const nurses = read().pivot(hospitalOf(patient, actor), 'hospitalNurses', { actor })
+          const nurses = read().pivot(hospitalOf(patient, actor), 'hospitalNurses', { actor }) as ObjectSet<Nurse>
           const assessments = nurses.objects.map((object) => ({ object, reasons: nurseReasons(patient, bed, object, actor) }))
           return { set: objectSet('Nurse', assessments.filter((a) => !a.reasons.length).map((a) => a.object)), assessments }
         },

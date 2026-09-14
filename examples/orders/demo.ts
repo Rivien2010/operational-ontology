@@ -41,7 +41,7 @@ const hq = { actor: 'user:hq' }
 const yamada = rt.get('Customer', 'N-C01', hq)!
 console.log(`orders of ${yamada.properties.name}:`)
 for (const o of rt.traverse(yamada, 'customerOrders', hq).objects) {
-  console.log(`  ${o.pk}  ${o.properties.status.padEnd(9)} ¥${o.properties.total}`)
+  console.log(`  ${o.pk}  ${(o.properties.status as string).padEnd(9)} ¥${o.properties.total}`)
 }
 console.log('who ordered Keyboard (reverse traversal):',
   rt.traverse(rt.get('Product', 'ITM-101', hq)!, 'orderProducts', hq).objects.map((o) => o.pk))
@@ -54,7 +54,7 @@ for (const customer of rt.search('Customer', hq).objects) {
   const region = customer.properties.region
   const row = byRegion.get(region) ?? { count: 0, sum: 0 }
   row.count += pending.objects.length
-  row.sum += pending.objects.reduce((sum, order) => sum + order.properties.total, 0)
+  row.sum += pending.objects.reduce((sum, order) => sum + (order.properties.total as number), 0)
   byRegion.set(region, row)
 }
 console.log('pending order value by region:', Object.fromEntries(byRegion))

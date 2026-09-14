@@ -5,7 +5,7 @@ import Database from 'better-sqlite3'
 import { z } from 'zod'
 import {
   createRuntime, defineAction, defineFunction, defineLink, defineObject, defineOntology, modify, reject,
-  type Direction, type ObjectInstance, type ObjectOf, type ParamsOf, type TraverseOptions,
+  type ObjectInstance, type ObjectOf, type ObjectSet,
   type Runtime, type ActionResult,
 } from '../src/index.js'
 
@@ -47,122 +47,50 @@ type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 const assertType = <_T extends true>(): void => {}
 type Customer = ObjectInstance<'Customer', { id: string; name: string }>
 type Order = ObjectInstance<'Order', { id: string; status: 'pending' | 'shipped' | 'cancelled'; total: number }>
-type Employee = ObjectOf<typeof model, 'Employee'>
 const actor = { actor: 'admin' }
 
 assertType<Same<ObjectOf<typeof model, 'Customer'>, Customer>>()
 assertType<Same<ObjectOf<typeof model, 'Order'>, Order>>()
-assertType<Same<ParamsOf<typeof model, 'cancelOrder'>, { orderId: string; reason: string }>>()
 
-export function compileOnly(rt: ReturnType<typeof createRuntime<typeof model>>, direction: Direction): void {
-  // @ts-expect-error a model without functions has no callable function names
-  rt.run('labels', { prefix: 'order' }, actor)
-  // Object names determine the instance shape.
-  const maybeOrder = rt.get('Order', 'O1', actor)
-  assertType<Same<typeof maybeOrder, Order | undefined>>()
-  // @ts-expect-error unknown object type
-  rt.get('Invoice', 'X', actor)
-  const order = maybeOrder!
-  // @ts-expect-error tags are read-only
+/** Basic shapes and direct result lookups remain; inputs are not a model-driven menu. */
+export function compileOnly(rt: Runtime<typeof model>, name: string): void {
+  const order = rt.get('Order', 'O1', actor)!
+  assertType<Same<typeof order, Order>>()
+  assertType<Same<ReturnType<typeof rt.traverse>, ObjectSet>>()
+  const dynamic = rt.get(name, 'id', actor)
+  assertType<Same<typeof dynamic, ObjectInstance | undefined>>()
+  const pending = rt.search('Order', { ...actor, filter: (o) => o.properties.total > 100 })
+  assertType<Same<typeof pending, ObjectSet<Order>>>()
+  // @ts-expect-error identity is readonly
   order.type = 'Order'
-  // @ts-expect-error business properties are nested
+  // @ts-expect-error properties belong in the properties field
   order.status
+  // @ts-expect-error get's explicit object name still gives concrete properties
+  order.properties.missing
+  // @ts-expect-error traversal still requires an instance with properties
+  rt.traverse({ type: 'Order', pk: 'O1' }, 'customerOrders', actor)
+  // @ts-expect-error direction has a fixed vocabulary even without model-dependent choices
+  rt.traverse(order, 'customerOrders', { ...actor, direction: 'sideways' })
 
-  // Only links connected to the source are available.
-  const customer = rt.get('Customer', 'C1', actor)!
-  const orders = rt.traverse(customer, 'customerOrders', actor).objects
-  assertType<Same<typeof orders, readonly Order[]>>()
-  // @ts-expect-error unknown link
-  rt.traverse(order, 'orderLines', actor).objects
-  // @ts-expect-error an unrelated link cannot widen the source type
-  rt.traverse(order, 'manages', { ...actor, direction: 'forward' }).objects
-  // @ts-expect-error dynamic unvalidated names do not match a model link
-  rt.traverse(customer, 'customerOrders' as string, actor).objects
-  // @ts-expect-error a primary key alone is not an instance
-  rt.traverse('C1', 'customerOrders', actor).objects
-  // @ts-expect-error a reference without properties is not an instance
-  rt.traverse({ type: 'Customer', pk: 'C1' }, 'customerOrders', actor).objects
-
-  // One possible direction: omit it, or supply exactly that direction.
-  rt.traverse(customer, 'customerOrders', { ...actor, direction: 'forward' }).objects
-  // @ts-expect-error the opposite direction cannot widen the source type
-  rt.traverse(customer, 'customerOrders', { ...actor, direction: 'reverse' }).objects
-  const customers = rt.traverse(order, 'customerOrders', actor).objects
-  assertType<Same<typeof customers, readonly Customer[]>>()
-  // @ts-expect-error reverse is the only possible direction from Order
-  rt.traverse(order, 'customerOrders', { ...actor, direction: 'forward' }).objects
-  const maybeReverse: TraverseOptions<typeof model, 'Order', 'customerOrders'> = actor
-  const stillCustomers = rt.traverse(order, 'customerOrders', maybeReverse).objects
-  assertType<Same<typeof stillCustomers, readonly Customer[]>>()
-
-  // Two possible directions: a choice is required, including through variables.
-  const employee = rt.get('Employee', 'E1', actor)!
-  const employees = rt.traverse(employee, 'manages', { ...actor, direction }).objects
-  assertType<Same<typeof employees, readonly Employee[]>>()
-  // @ts-expect-error same-type links require direction even when the value is in a variable
-  rt.traverse(employee, 'manages', actor).objects
-  // @ts-expect-error undefined is not a choice of direction
-  rt.traverse(employee, 'manages', { ...actor, direction: undefined }).objects
-  const maybeDirection: { actor: string; direction?: Direction } = actor
-  // @ts-expect-error optional direction cannot satisfy a same-type link
-  rt.traverse(employee, 'manages', maybeDirection).objects
-
-  // Narrowing the tag selects the matching properties and traversal result.
-  const either = rt.get(Math.random() ? 'Order' : 'Customer', 'shared-id', actor)!
-  if (either.type === 'Order') {
-    assertType<Same<typeof either, Order>>()
-    const result = rt.traverse(either, 'customerOrders', actor).objects
-    assertType<Same<typeof result, readonly Customer[]>>()
-  }
-  // @ts-expect-error properties must match the tag
-  rt.traverse({ type: 'Customer', pk: order.pk, properties: order.properties }, 'customerOrders', actor).objects
-
-  // Queries and snapshots use the model's names and property types.
-  const pending = rt.search('Order', { ...actor, filter: [{ property: 'status', op: 'eq', value: 'pending' }] }).objects
-  assertType<Same<typeof pending, readonly Order[]>>()
-  // @ts-expect-error a filter value outside the enum
-  rt.search('Order', { ...actor, filter: [{ property: 'status', op: 'eq', value: 'lost' }] }).objects
-  rt.search('Order', { ...actor, filter: (o) => o.properties.total > 100 && o.type === 'Order' }).objects
-  rt.aggregate(rt.search('Order', actor), { groupBy: 'status', sum: 'total' })
-  // @ts-expect-error only numeric values are summable
-  rt.aggregate(rt.search('Order', actor), { groupBy: 'status', sum: 'id' })
-  rt.load({ objects: { Customer: [{ id: 'C1', name: 'Yamada' }] }, links: { customerOrders: [] } })
-  // @ts-expect-error unknown object type in a snapshot
-  rt.load({ objects: { Invoice: [] } })
-
-  // Action params come from the definition; modify's properties come from the instance.
-  rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
-  rt.preview('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
-  // @ts-expect-error preview derives action names from the same model
-  rt.preview('deleteEverything', {}, actor)
-  // @ts-expect-error preview requires the action's params
-  rt.preview('cancelOrder', { orderId: 'O1' }, actor)
-  // @ts-expect-error unknown action
-  rt.run('deleteEverything', {}, actor)
-  // @ts-expect-error a required param is missing
+  // These compile; runtime tests below and in core/query.test.ts exercise refusal.
+  rt.get('Unknown', 'id', actor)
+  rt.traverse(order, name, actor)
+  rt.traverse(order, 'manages', actor)
+  rt.search('Order', { ...actor, filter: [{ property: 'status', op: 'eq', value: 'lost' }] })
   rt.run('cancelOrder', { orderId: 'O1' }, actor)
-  rt.auditLog({ action: 'cancelOrder' })
-  // @ts-expect-error unknown action in an audit filter
-  rt.auditLog({ action: 'deleteEverything' })
-  modify(order, { status: 'cancelled' })
-  // @ts-expect-error invalid property name
-  modify(order, { name: 'x' })
-  // @ts-expect-error invalid enum value
-  modify(order, { status: 'lost' })
+  rt.preview(name, {}, actor)
+  modify(order, { status: 'lost', missing: 1 })
+
   defineAction(objects, {
     object: 'Order', targetParam: 'orderId', params: { orderId: z.string(), count: z.number() },
     preconditions: [({ object, params }) => {
       assertType<Same<typeof object, Order>>()
       assertType<Same<typeof params.count, number>>()
-      // @ts-expect-error action callbacks have model-derived properties
+      // @ts-expect-error model authors retain concrete property types
       object.properties.name
-      // @ts-expect-error action callbacks have schema-derived params
+      // @ts-expect-error rule parameters are parsed according to their schemas
       params.reason
     }], effects: () => [],
-  })
-  defineAction(objects, {
-    // @ts-expect-error action targets must be in the object definitions
-    object: 'Invoice', targetParam: 'id', params: { id: z.string() }, preconditions: [], effects: () => [],
   })
 }
 
@@ -177,25 +105,19 @@ const functionModel = defineOntology({
   },
 })
 
-export function compileOnlyFunctions(rt: Runtime<typeof functionModel>): void {
+export function compileOnlyFunctions(rt: Runtime<typeof functionModel>, name: string): void {
   const labels = rt.run('labels', { prefix: 'order' }, actor)
   assertType<Same<typeof labels, string[]>>()
   const identity = rt.run('whoAmI', {}, actor)
   assertType<Same<typeof identity, Promise<string>>>()
   const cancelled = rt.run('cancelOrder', { orderId: 'O1', reason: 'duplicate' }, actor)
   assertType<Same<typeof cancelled, ActionResult>>()
-  // @ts-expect-error a function name must be declared in the model
-  rt.run('unknownFunction', {}, actor)
-  // @ts-expect-error function inputs come from their schemas
-  rt.run('labels', {}, actor)
-  // @ts-expect-error count is numeric
+  const dynamic = rt.run(name, {}, actor)
+  assertType<Same<typeof dynamic, unknown>>()
+  // Argument validation belongs to the model's Zod schemas at runtime.
   rt.run('labels', { prefix: 'order', count: 'two' }, actor)
-  // @ts-expect-error a different operation's params must not widen the selected name
-  rt.run('labels', { orderId: 'O1', reason: 'duplicate' }, actor)
-  // @ts-expect-error an action requires its own params, even when a function accepts these
-  rt.run('cancelOrder', { prefix: 'order' }, actor)
-  // @ts-expect-error preview validates action plans, not function results
-  rt.preview('labels', { prefix: 'order' }, actor)
+  rt.run('unknownFunction', {}, actor)
+  rt.preview('labels', {}, actor)
 }
 
 function setup() {
@@ -238,7 +160,6 @@ test('same-type links require direction even at an endpoint with only incoming o
   assert.deepEqual(rt.traverse(ren, 'manages', { ...actor, direction: 'reverse' }).objects.map((o) => o.properties.name), ['Aki'])
   assert.deepEqual(rt.traverse(ren, 'manages', { ...actor, direction: 'forward' }).objects.map((o) => o.properties.name), ['Mio'])
   for (const employee of rt.search('Employee', actor).objects) {
-    // @ts-expect-error runtime must also reject missing direction
     assert.throws(() => rt.traverse(employee, 'manages', actor).objects, /requires a direction/)
   }
 })
@@ -246,9 +167,7 @@ test('same-type links require direction even at an endpoint with only incoming o
 test('traversal validates source and direction and re-reads visibility from stored properties', () => {
   const rt = setup()
   const customer = rt.get('Customer', 'C1', actor)!
-  // @ts-expect-error runtime defense against the opposite direction
   assert.throws(() => rt.traverse(customer, 'customerOrders', { ...actor, direction: 'reverse' }).objects, /invalid direction/)
-  // @ts-expect-error runtime defense against an unrelated link
   assert.throws(() => rt.traverse(customer, 'manages', { ...actor, direction: 'forward' }).objects, /does not connect/)
   // @ts-expect-error runtime defense against the old reference API
   assert.throws(() => rt.traverse({ type: 'Customer', pk: 'C1' }, 'customerOrders', actor).objects, /requires an object instance/)

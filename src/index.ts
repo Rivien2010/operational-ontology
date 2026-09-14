@@ -1,7 +1,7 @@
 /**
  * Public entry point: define a model, create a Runtime, then expose it through
  * MCP if needed. Store and query evaluators remain implementation details;
- * callers work with typed instances, sets and operation results.
+ * callers work with instances, sets and operation results.
  */
 export {
   defineObject,
@@ -29,27 +29,17 @@ export type {
   ActionDef,
   ActionCtx,
   FunctionDef,
-  FunctionName,
-  OperationName,
-  OperationParamsOf,
   OperationResultOf,
   OntologyDef,
-  ObjectName,
-  LinkName,
-  ActionName,
   Direction,
   ObjectOf,
   ObjectInstance,
   ObjectFilter,
   ObjectSet,
   AggregationResult,
+  AggregationRow,
   Where,
-  MetricWhere,
-  LinksFrom,
-  LinkDirections,
-  LinkTarget,
   TraverseOptions,
-  ParamsOf,
   Violation,
   Edit,
   ActionResult,

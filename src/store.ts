@@ -9,7 +9,7 @@ import { z } from 'zod'
 import type { Database } from 'better-sqlite3'
 import { isPlainJson, reject } from './model.js'
 import type {
-  ActionName, AuditEntry, Edit, LinkName, ObjectInstance, ObjectName,
+  AuditEntry, Edit, ObjectInstance,
   ObjectTypeDef, OntologyDef, Properties, Violation,
 } from './model.js'
 
@@ -18,12 +18,12 @@ import type {
 class Rollback extends Error {}
 
 /** Internal concrete store. Application writes enter through Runtime actions. */
-export class Store<Model extends OntologyDef = OntologyDef> {
-  readonly ontology: Model
+export class Store {
+  readonly ontology: OntologyDef
   readonly #db: Database
   readonly #schemas = new Map<string, z.ZodObject<Properties>>()
 
-  constructor(ontology: Model, db: Database) {
+  constructor(ontology: OntologyDef, db: Database) {
     this.ontology = ontology
     this.#db = db
     for (const [name, obj] of Object.entries(ontology.objects)) {
@@ -67,8 +67,8 @@ export class Store<Model extends OntologyDef = OntologyDef> {
    * Runtime.load documents the caller-facing indexing contract.
    */
   load(snapshot: {
-    objects?: { [K in ObjectName<Model>]?: Record<string, unknown>[] }
-    links?: { [Link in LinkName<Model>]?: Array<[from: string, to: string]> }
+    objects?: Record<string, Record<string, unknown>[]>
+    links?: Record<string, Array<[from: string, to: string]>>
   }): void {
     this.refuseOpenTransaction('load')
     const insertObject = this.#db.prepare('INSERT INTO objects (type, pk, data) VALUES (?, ?, ?)')
@@ -161,7 +161,7 @@ export class Store<Model extends OntologyDef = OntologyDef> {
   }
 
   /** Decode administrative history; rejected targets need not be existing or visible objects. */
-  auditLog(filter: { action?: ActionName<Model>; status?: 'applied' | 'rejected'; target?: string } = {}): AuditEntry[] {
+  auditLog(filter: { action?: string; status?: 'applied' | 'rejected'; target?: string } = {}): AuditEntry[] {
     const rows = this.#db.prepare('SELECT * FROM audit_log ORDER BY seq').all() as Array<{
       seq: number
       ts: string
@@ -464,7 +464,7 @@ export class Store<Model extends OntologyDef = OntologyDef> {
    * write-back has already happened in Runtime and cannot be rolled back here.
    * Parameters<...>[0] reuses audit's input shape instead of duplicating it.
    */
-  commit(edits: Edit[], entry: Parameters<Store<Model>['audit']>[0]): void {
+  commit(edits: Edit[], entry: Parameters<Store['audit']>[0]): void {
     this.#db.transaction(() => {
       this.#applyEdits(edits)
       this.audit(entry)

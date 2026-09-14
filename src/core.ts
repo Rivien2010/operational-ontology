@@ -22,7 +22,7 @@
  *
  * Runtime coordinates actor-scoped reads and the Action gate. Store owns
  * SQLite integrity and transactions; query.ts operates on evaluated values.
- * The public methods keep those details behind one model-derived API.
+ * The public methods expose data shapes; runtime checks enforce model constraints.
  */
 import { z } from 'zod'
 import type { Database } from 'better-sqlite3'
@@ -30,16 +30,14 @@ import type { Database } from 'better-sqlite3'
 import { defineOntology, isPlainJson, reject } from './model.js'
 import { Store } from './store.js'
 import * as query from './query.js'
-import type { ObjectSet, AggregationResult, ObjectFilter, GroupProperty, SumProperty, MetricWhere } from './query.js'
+import type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter, Where } from './query.js'
 import type {
-  ActionCtx, ActionDef, ActionName, ActionResult, AuditEntry, Edit, ObjectInstance, ObjectName,
-  ObjectOf, OntologyDef, ParamsOf, LinkName, LinksFrom, LinkTarget,
-  TraverseOptions, Violation,
-  OperationName, OperationParamsOf, OperationResultOf,
+  ActionCtx, ActionDef, ActionResult, AuditEntry, Edit, ObjectInstance,
+  ObjectOf, OntologyDef, TraverseOptions, Violation, OperationResultOf,
 } from './model.js'
 export * from './model.js'
 export { objectSet, aggregationResult } from './query.js'
-export type { ObjectSet, AggregationResult, ObjectFilter, Where, MetricWhere } from './query.js'
+export type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter, Where } from './query.js'
 
 // ───────────────────────────── Write-back ─────────────────────────────
 
@@ -88,14 +86,14 @@ export const declarations = {
 } as const
 
 /**
- * Interpret one specific model. Carrying Model through the class preserves
- * names and schemas for every method's hints and result types. The private
+ * Interpret one model. Model is kept only for simple get/search/run result
+ * lookups; operation inputs use strings and plain data, checked at runtime.
  * Store holds ontology state separately from the indexed source systems.
  */
 export class Runtime<Model extends OntologyDef = OntologyDef> {
   readonly ontology: Model
   readonly declarations = declarations
-  readonly #store: Store<Model>
+  readonly #store: Store
   readonly #writeback?: WritebackAdapter
 
   constructor(ontology: Model, db: Database, opts: { writeback?: WritebackAdapter } = {}) {
@@ -115,106 +113,66 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
    * "Re-indexing vs edits" in IMPLEMENTATION.md.
    */
   load(snapshot: {
-    objects?: { [K in ObjectName<Model>]?: Record<string, unknown>[] }
-    links?: { [Link in LinkName<Model>]?: Array<[from: string, to: string]> }
+    objects?: Record<string, Record<string, unknown>[]>
+    links?: Record<string, Array<[from: string, to: string]>>
   }): void {
     this.#store.load(snapshot)
   }
 
   /** The selected type determines properties; hidden and missing IDs both yield undefined. */
-  get<K extends ObjectName<Model>>(type: K, pk: string, opts: { actor: string }): ObjectOf<Model, K> | undefined {
+  get<K extends string>(type: K, pk: string, opts: { actor: string }): ObjectOf<Model, K> | undefined {
     return this.#read<ObjectOf<Model, K>>(type, pk, opts.actor)
   }
 
-  /** Read visible objects, then filter. NoInfer keeps conditions tied to the selected type. */
-  search<K extends ObjectName<Model>>(
-    type: K, opts: { actor: string; filter?: ObjectFilter<ObjectOf<Model, K>, Model['objects'][NoInfer<K>]['properties']> },
-  ): ObjectSet<ObjectOf<Model, K>> {
-    const set = query.objectSet(type, this.#scan(type, opts.actor) as ObjectOf<Model, K>[]) as ObjectSet<ObjectOf<Model, K>>
+  /** Read visible objects, then apply conditions checked against the stored schema. */
+  search<K extends string>(type: K, opts: { actor: string; filter?: ObjectFilter<ObjectOf<Model, K>> }): ObjectSet<ObjectOf<Model, K>> {
+    const set = query.objectSet(type, this.#scan(type, opts.actor) as ObjectOf<Model, K>[])
     return opts.filter === undefined ? set : query.filterObjects(set, opts.filter, this.ontology.objects[type].properties)
   }
 
-  /**
-   * Infer the source, then the link; options cannot widen either choice.
-   * LinksFrom supplies related names, TraverseOptions determines direction,
-   * and LinkTarget carries the destination's property type into the result.
-   */
-  traverse<Source extends ObjectName<Model>, Link extends LinksFrom<Model, NoInfer<Source>>>(
-    source: ObjectOf<Model, Source>, linkName: Link,
-    opts: TraverseOptions<Model, NoInfer<Source>, NoInfer<Link>>,
-  ): ObjectSet<ObjectOf<Model, LinkTarget<Model, Source, Link>>> {
+  /** Links, endpoints and direction are checked from the model at execution time. */
+  traverse(source: ObjectInstance, linkName: string, opts: TraverseOptions): ObjectSet {
     if (!source || typeof source.type !== 'string' || typeof source.pk !== 'string' ||
         !source.properties || typeof source.properties !== 'object' || Array.isArray(source.properties)) {
       throw new Error('traverse() requires an object instance with type, pk, and properties')
     }
-    return this.#follow(source.type, [source.pk], linkName, opts) as ObjectSet<ObjectOf<Model, LinkTarget<Model, Source, Link>>>
+    return this.#follow(source.type, [source.pk], linkName, opts)
   }
 
-  /** Follow one relationship from a whole set; its tag works even when the set is empty. */
-  pivot<Source extends ObjectName<Model>, Link extends LinksFrom<Model, NoInfer<Source>>>(
-    source: ObjectSet<ObjectOf<Model, Source>>, linkName: Link,
-    opts: TraverseOptions<Model, NoInfer<Source>, NoInfer<Link>>,
-  ): ObjectSet<ObjectOf<Model, LinkTarget<Model, Source, Link>>> {
+  /** Follow a relationship from a whole set; the output tag is known at runtime. */
+  pivot(source: ObjectSet, linkName: string, opts: TraverseOptions): ObjectSet {
     const set = query.objectSet(source.type, source.objects)
-    return this.#follow(set.type, set.objects.map((o) => o.pk), linkName, opts) as ObjectSet<ObjectOf<Model, LinkTarget<Model, Source, Link>>>
+    return this.#follow(set.type, set.objects.map((o) => o.pk), linkName, opts)
   }
 
-  /**
-   * Overloads select the condition vocabulary: object properties for a set,
-   * numeric metric columns for an aggregation. Neither refreshes stored data.
-   * NoInfer prevents a condition from expanding the input's allowed fields.
-   */
-  filter<Source extends ObjectName<Model>>(
-    input: ObjectSet<ObjectOf<Model, Source>>,
-    where: ObjectFilter<ObjectOf<Model, NoInfer<Source>>, Model['objects'][NoInfer<Source>]['properties']>,
-  ): ObjectSet<ObjectOf<Model, Source>>
-  filter<O extends ObjectInstance, C extends string>(
-    input: AggregationResult<O, C>, where: MetricWhere<NoInfer<C>> | ((row: Readonly<Record<C, number>>) => boolean),
-  ): AggregationResult<O, C>
+  /** Preserve the input shape; property/operator/value combinations are runtime checks. */
+  filter<O extends ObjectInstance>(input: ObjectSet<O>, where: ObjectFilter<O>): ObjectSet<O>
+  filter<O extends ObjectInstance>(
+    input: AggregationResult<O>, where: Where | ((row: AggregationRow) => boolean),
+  ): AggregationResult<O>
   filter(input: ObjectSet | AggregationResult, where: unknown): ObjectSet | AggregationResult {
-    if ('set' in input) return query.filterAggregation(input, where as MetricWhere<never>)
+    if ('set' in input) return query.filterAggregation(input, where as Where)
     const def = Object.hasOwn(this.ontology.objects, input.type) ? this.ontology.objects[input.type] : undefined
     if (!def) throw new Error(`unknown object type "${input.type}"`)
     return query.filterObjects(input, where, def.properties)
   }
 
-  // For all three operations, infer the type from a and check b against it.
-  // Without NoInfer, an unrelated b could widen Source to a union of both types.
-  union<Source extends ObjectName<Model>>(a: ObjectSet<ObjectOf<Model, Source>>, b: NoInfer<ObjectSet<ObjectOf<Model, Source>>>): ObjectSet<ObjectOf<Model, Source>> {
-    return query.combine('union', a, b)
-  }
+  /** Set algebra checks matching tags at runtime and preserves the left snapshots. */
+  union(a: ObjectSet, b: ObjectSet): ObjectSet { return query.combine('union', a, b) }
+  intersect(a: ObjectSet, b: ObjectSet): ObjectSet { return query.combine('intersect', a, b) }
+  subtract(a: ObjectSet, b: ObjectSet): ObjectSet { return query.combine('subtract', a, b) }
 
-  intersect<Source extends ObjectName<Model>>(a: ObjectSet<ObjectOf<Model, Source>>, b: NoInfer<ObjectSet<ObjectOf<Model, Source>>>): ObjectSet<ObjectOf<Model, Source>> {
-    return query.combine('intersect', a, b)
-  }
-
-  subtract<Source extends ObjectName<Model>>(a: ObjectSet<ObjectOf<Model, Source>>, b: NoInfer<ObjectSet<ObjectOf<Model, Source>>>): ObjectSet<ObjectOf<Model, Source>> {
-    return query.combine('subtract', a, b)
-  }
-
-  /**
-   * Every result has count; requesting sum adds that column to the result type.
-   * sum?: never keeps an invalid sum request from matching the count-only overload.
-   * The result retains source objects as members, alongside the grouped metrics.
-   */
-  aggregate<Source extends ObjectName<Model>>(
-    set: ObjectSet<ObjectOf<Model, Source>>,
-    options: { groupBy: GroupProperty<Model['objects'][NoInfer<Source>]['properties']>; sum: SumProperty<Model['objects'][NoInfer<Source>]['properties']> },
-  ): AggregationResult<ObjectOf<Model, Source>, 'count' | 'sum'>
-  aggregate<Source extends ObjectName<Model>>(
-    set: ObjectSet<ObjectOf<Model, Source>>,
-    options: { groupBy: GroupProperty<Model['objects'][NoInfer<Source>]['properties']>; sum?: never },
-  ): AggregationResult<ObjectOf<Model, Source>, 'count'>
-  aggregate(set: ObjectSet, options: { groupBy: string; sum?: string }): AggregationResult {
+  /** Results have count, plus sum when requested. The schema checks grouping and numeric fields. */
+  aggregate<O extends ObjectInstance>(set: ObjectSet<O>, options: { groupBy: string; sum?: string }): AggregationResult<O> {
     const def = Object.hasOwn(this.ontology.objects, set.type) ? this.ontology.objects[set.type] : undefined
     if (!def) throw new Error(`unknown object type "${set.type}"`)
     return query.aggregate(set, options, def.properties)
   }
 
   /** Traversal always re-reads both ends as this actor; snapshots are not authority. */
-  #follow(type: string, pks: readonly string[], linkName: string, opts: { actor: string; direction?: 'forward' | 'reverse' }): ObjectSet {
+  #follow(type: string, pks: readonly string[], linkName: string, opts: TraverseOptions): ObjectSet {
     // Check the schema before iterating: an empty set must not hide a bad link
-    // or an ambiguous direction. These are also checks for untyped JS callers.
+    // or an ambiguous direction, regardless of the caller's language.
     const link = Object.hasOwn(this.ontology.links, linkName) ? this.ontology.links[linkName] : undefined
     if (!link) throw new Error(`unknown link type "${linkName}"`)
     const forward = type === link.from
@@ -240,11 +198,11 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
 
   /**
    * One entry point for named operations; only actions pass through the write gate.
-   * The selected name determines params and result. A Function's result passes
+   * The supplied schema checks params. A Function's result passes
    * through as defined, including a Promise; Action execution is synchronous.
    */
-  run<Name extends OperationName<Model>>(
-    name: Name, params: NoInfer<OperationParamsOf<Model, Name>>, opts: { actor: string },
+  run<Name extends string>(
+    name: Name, params: Record<string, unknown>, opts: { actor: string },
   ): OperationResultOf<Model, Name> {
     if (Object.hasOwn(this.ontology.actions, name)) {
       return this.#runAction(name, params, opts, 'run') as OperationResultOf<Model, Name>
@@ -256,7 +214,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
   }
 
   /** Validate an action's plan without write-back, commit, or audit. */
-  preview<A extends ActionName<Model>>(actionName: A, params: NoInfer<ParamsOf<Model, A>>, opts: { actor: string }): ActionResult {
+  preview(actionName: string, params: Record<string, unknown>, opts: { actor: string }): ActionResult {
     return this.#runAction(actionName, params, opts, 'preview')
   }
 
@@ -465,7 +423,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
   }
 
   /** Administrative history, not an actor-scoped object query. */
-  auditLog(filter: { action?: ActionName<Model>; status?: 'applied' | 'rejected'; target?: string } = {}): AuditEntry[] {
+  auditLog(filter: { action?: string; status?: 'applied' | 'rejected'; target?: string } = {}): AuditEntry[] {
     return this.#store.auditLog(filter)
   }
 

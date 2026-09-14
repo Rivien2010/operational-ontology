@@ -22,16 +22,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { objectSet, aggregationResult } from './core.js'
-import type { AggregationResult, ObjectInstance, Runtime, TraverseOptions, OntologyDef, Where } from './core.js'
-import { fieldInfo, whereSchema, type Condition, type MetricWhere } from './query.js'
+import type { ActionResult, AggregationResult, ObjectInstance, Runtime, OntologyDef } from './core.js'
+import { fieldInfo, whereSchema, type Condition } from './query.js'
 import pkg from '../package.json' with { type: 'json' }
 
 /**
- * Enumerate any model at runtime. Unlike a typed application call, these tool
- * names are dynamic strings; Zod schemas and Runtime checks validate their use.
- * Type assertions in handlers bridge that dynamic boundary, not validate input.
+ * Enumerate a model to publish its choices as tool schemas. These guide and
+ * validate agent inputs independently of the application's TypeScript types.
  */
-export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpServer {
+export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, opts: { agent?: string } = {}): McpServer {
   // The version an agent sees is the package's — one place to bump.
   const server = new McpServer({ name: `operational-ontology:${rt.ontology.name}`, version: pkg.version })
   // Tool names are derived from model names, so two model names can collide
@@ -90,7 +89,7 @@ export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpS
         inputSchema: z.object({ where: where.optional() }).strict(),
       },
       guarded(async (args: { where?: Condition[] }, extra: { sessionId?: string }) =>
-        asJson(rt.search(typeName, { actor: actorOf(extra), filter: args.where as Where<any> | undefined }))),
+        asJson(rt.search(typeName, { actor: actorOf(extra), filter: args.where }))),
     )
     server.registerTool(
       toolName(`get_${snake(typeName)}`, `object type ${typeName}`),
@@ -118,9 +117,9 @@ export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpS
         description: `Filter a ${typeName} set by properties, or an aggregation by numeric columns. Pass source={pks:[...]} for objects, or the returned aggregation with set/columns/values. Object snapshots are reloaded as this session; supplied metrics are analysis data and are not recomputed.`,
         inputSchema: z.object({ source: z.union([z.object({ pks: z.array(z.string()) }).strict(), aggregation]), where: z.union([where, metricWhere]) }).strict(),
       },
-      guarded(async (args: { source: { pks: string[] } | AggregationResult<ObjectInstance, string>; where: Condition[] }, extra: { sessionId?: string }) => {
+      guarded(async (args: { source: { pks: string[] } | AggregationResult<ObjectInstance>; where: Condition[] }, extra: { sessionId?: string }) => {
         const actor = actorOf(extra)
-        if ('pks' in args.source) return asJson(rt.filter(hydrate(typeName, args.source.pks, actor), args.where as Where<any>))
+        if ('pks' in args.source) return asJson(rt.filter(hydrate(typeName, args.source.pks, actor), args.where))
         const source = args.source
         // Validate the incoming correspondence before applying session visibility.
         const checked = aggregationResult(source.set, source.columns, source.values)
@@ -130,7 +129,7 @@ export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpS
         // Drop the whole row: its metric may come from other evidence (e.g.
         // transfers), so the remaining target objects cannot reconstruct it.
         const rows = checked.values.filter((row) => row.pks.every((pk) => visible.has(pk)))
-        return asJson(rt.filter(aggregationResult(set, checked.columns, rows), args.where as MetricWhere<string>))
+        return asJson(rt.filter(aggregationResult(set, checked.columns, rows), args.where))
       }),
     )
     // Per-type tools make both ID lists use the same object identity namespace.
@@ -160,7 +159,7 @@ export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpS
       guarded(async (rawArgs: Record<string, unknown>, extra: { sessionId?: string }) => {
         const args = rawArgs as { pks: string[]; group_by: string; sum?: string; where?: Condition[] }
         const source = hydrate(typeName, args.pks, actorOf(extra))
-        const set = args.where === undefined ? source : rt.filter(source, args.where as Where<any>)
+        const set = args.where === undefined ? source : rt.filter(source, args.where)
         return asJson(args.sum === undefined ? rt.aggregate(set, { groupBy: args.group_by })
           : rt.aggregate(set, { groupBy: args.group_by, sum: args.sum }))
       }),
@@ -191,11 +190,10 @@ export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpS
         },
       },
       guarded(async (args: { source: ObjectInstance; direction?: 'forward' | 'reverse' }, extra: { sessionId?: string }) =>
-        // Names are dynamic here. The runtime checks the instance, link, and
-        // direction together; no permissive overload is needed by typed callers.
+        // The runtime checks the instance, link and direction together.
         asJson(rt.traverse(args.source, linkName, {
           actor: actorOf(extra), direction: args.direction,
-        } as TraverseOptions<OntologyDef, string, string>))),
+        }))),
     )
   }
 
@@ -212,7 +210,7 @@ export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpS
       guarded(async (args: { source: { type: string; pks: string[] }; direction?: 'forward' | 'reverse' }, extra: { sessionId?: string }) => {
         const actor = actorOf(extra)
         return asJson(rt.pivot(hydrate(args.source.type, args.source.pks, actor), linkName,
-          { actor, direction: args.direction } as TraverseOptions<OntologyDef, string, string>))
+          { actor, direction: args.direction }))
       }),
     )
   }
@@ -230,7 +228,8 @@ export function buildMcpServer(rt: Runtime, opts: { agent?: string } = {}): McpS
         inputSchema: action.params,
       },
       guarded(async (params: Record<string, unknown>, extra: { sessionId?: string }) => {
-        const result = rt.run(actionName, params, { actor: actorOf(extra) })
+        // This name was enumerated from actions, so the result is an ActionResult.
+        const result = rt.run(actionName, params, { actor: actorOf(extra) }) as ActionResult
         if (!result.ok) {
           return { ...asJson({ error: result.error }), isError: true }
         }

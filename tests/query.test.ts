@@ -54,8 +54,8 @@ test('set identity, empty tags and stable algebra require no database', () => {
   assert.deepEqual(ids(combine('subtract', a, b)), ['L2'])
   assert.deepEqual(combine('subtract', a, a), { type: 'Lot', objects: [] })
   const other = objectSet('Equipment', [{ type: 'Equipment', pk: 'L1', properties: { id: 'L1' } }])
-  assert.throws(() => combine('union', a, other as unknown as ObjectSet<Lot>), /same object type/)
-  assert.throws(() => objectSet('Lot', other.objects as unknown as Lot[]), /differently tagged/)
+  assert.throws(() => combine('union', a, other), /same object type/)
+  assert.throws(() => objectSet('Lot', other.objects), /differently tagged/)
   assert.deepEqual(ids(a), ['L2', 'L1'], 'inputs were not changed')
 })
 
@@ -135,7 +135,7 @@ test('custom Function metrics use the same aggregation contract', () => {
   assert.equal(selected.values[0].totalAmount, 5100000)
   assert.throws(() => aggregationResult(set, { count: 'number' }, [{ key: 'A', pks: ['missing'], count: 1 }]), /unknown object/)
   assert.throws(() => aggregationResult(set, { count: 'number' }, [{ key: 'A', pks: ['L1'], count: NaN }]), /invalid metric/)
-  assert.throws(() => filterAggregation(result, [{ property: 'count', op: 'gte', value: 2 }] as never))
+  assert.throws(() => filterAggregation(result, [{ property: 'count', op: 'gte', value: 2 }]))
   assert.deepEqual(aggregate(objectSet('Lot', [] as Lot[]), { groupBy: 'family' }, fields),
     { set: { type: 'Lot', objects: [] }, columns: { count: 'number' }, values: [] })
 })
@@ -150,60 +150,55 @@ test('pivot deduplicates, preserves empty target tags and rechecks visibility an
   assert.deepEqual(ids(alice), ['E2'])
   const forged = objectSet('Employee', [{ ...employees.objects[2], properties: { id: 'E3', owner: 'alice' } }])
   assert.deepEqual(ids(rt.pivot(forged, 'manages', { actor: 'alice', direction: 'reverse' })), [])
-  assert.throws(() => (rt.pivot as Function)(objectSet('Employee', []), 'manages', { actor: 'admin' }), /requires a direction/)
-  assert.throws(() => (rt.pivot as Function)(empty, 'producedOn', { actor: 'admin', direction: 'reverse' }), /invalid direction/)
+  assert.throws(() => rt.pivot(objectSet('Employee', []), 'manages', { actor: 'admin' }), /requires a direction/)
+  assert.throws(() => rt.pivot(empty, 'producedOn', { actor: 'admin', direction: 'reverse' }), /invalid direction/)
   assert.deepEqual(ids(rt.union(alice, employees)), ['E2', 'E1', 'E3'])
   assert.deepEqual(ids(rt.intersect(employees, alice)), ['E2'])
   assert.deepEqual(ids(rt.subtract(employees, alice)), ['E1', 'E3'])
 })
 
-/** These calls are checked, not executed. Bad input must not widen an inferred model name. */
+/** Fixed data shapes stay typed; schema-specific combinations are runtime checks. */
 export function compileOnly(rt: Runtime<Model>) {
-  const bareEmpty = objectSet('Lot', [])
-  const emptyTag: 'Lot' = bareEmpty.type
-  const empty: ObjectSet<Lot> = objectSet('Lot', [])
   const input = rt.search('Lot', { actor: 'admin' })
   const equipment = rt.search('Equipment', { actor: 'admin' })
-  type EitherSet = ObjectSet<ObjectOf<Model, 'Lot' | 'Equipment'>>
-  const paired: EitherSet = input
-  const otherPaired: EitherSet = equipment
-  // @ts-expect-error tag and element array must stay paired even in a union
-  const mismatch: EitherSet = { type: 'Equipment', objects: input.objects }
   // @ts-expect-error arrays are readonly
   input.objects.push(input.objects[0])
   // @ts-expect-error tags are readonly
   input.type = 'Lot'
-  // @ts-expect-error two different types are not one homogeneous set
-  rt.union(input, equipment)
-  // @ts-expect-error intersection must preserve the first set's type too
-  rt.intersect(input, equipment)
-  // @ts-expect-error subtraction must preserve the first set's type too
-  rt.subtract(input, equipment)
-  // @ts-expect-error constructor tag determines the permitted objects
-  objectSet('Equipment', input.objects)
-  rt.filter(input, [{ property: 'producedAt', op: 'gte', value: '2026-09-01T00:00:00Z' }])
-  // @ts-expect-error numeric conditions require numeric values
-  rt.filter(input, [{ property: 'units', op: 'gt', value: '40' }])
-  // @ts-expect-error strings are not ordered numeric or datetime fields
-  rt.filter(input, [{ property: 'family', op: 'gt', value: 'A' }])
-  // @ts-expect-error dates are compared as instants, not substrings
-  rt.filter(input, [{ property: 'producedAt', op: 'contains', value: '2026' }])
-  // @ts-expect-error enum values come from the schema
-  rt.filter(input, [{ property: 'quality', op: 'eq', value: 'lost' }])
-  // @ts-expect-error the equality shorthand was removed
+  // @ts-expect-error conditions still require the explicit clause array
   rt.filter(input, { quality: 'suspect' })
-  // @ts-expect-error an unrelated link cannot widen the set type
-  rt.pivot(input, 'manages', { actor: 'admin', direction: 'forward' })
-  const count = rt.aggregate(input, { groupBy: 'family' })
-  // @ts-expect-error sum was not requested
-  rt.filter(count, [{ property: 'sum', op: 'gt', value: 0 }])
-  const options = { groupBy: 'family', sum: 'quality' } as const
-  // @ts-expect-error a variable with a nonnumeric sum is also invalid
-  rt.aggregate(input, options)
+  // @ts-expect-error operation vocabulary is fixed, even without property-specific hints
+  rt.filter(input, [{ property: 'units', op: 'approximately', value: 40 }])
   const custom = aggregationResult(input, { senderCount: 'number' }, [{ key: 'X', pks: ['L1'], senderCount: 3 }])
-  const selected: AggregationResult<Lot, 'senderCount'> = rt.filter(custom, [{ property: 'senderCount', op: 'gte', value: 2 }])
+  const selected: AggregationResult<Lot> = rt.filter(custom, [{ property: 'senderCount', op: 'gte', value: 2 }])
   const exact: ObjectSet<Lot> = selected.set
-  // @ts-expect-error aggregation conditions address metrics, not Lot properties
-  rt.filter(custom, [{ property: 'units', op: 'gte', value: 2 }])
-  void [mismatch, exact, empty, emptyTag, paired, otherPaired]
+  // These are accepted by TypeScript and rejected by the runtime tests below.
+  rt.union(input, equipment)
+  objectSet('Equipment', input.objects)
+  rt.filter(input, [{ property: 'units', op: 'gt', value: '40' }])
+  rt.aggregate(input, { groupBy: 'family', sum: 'quality' })
+  void exact
 }
+
+test('public APIs reject model-specific mistakes without TypeScript navigation constraints', (t) => {
+  const rt = runtime(t)
+  const input = rt.search('Lot', { actor: 'admin' })
+  const equipment = rt.search('Equipment', { actor: 'admin' })
+  for (const operation of ['union', 'intersect', 'subtract'] as const) {
+    assert.throws(() => rt[operation](input, equipment), /same object type/)
+  }
+  assert.throws(() => objectSet('Equipment', input.objects), /differently tagged/)
+  const empty = rt.filter(input, () => false)
+  for (const where of [
+    [{ property: 'units', op: 'gt', value: '40' }],
+    [{ property: 'family', op: 'gt', value: 'A' }],
+    [{ property: 'producedAt', op: 'contains', value: '2026' }],
+    [{ property: 'quality', op: 'eq', value: 'lost' }],
+  ] as const) assert.throws(() => rt.filter(empty, where), z.ZodError)
+  assert.throws(() => rt.aggregate(empty, { groupBy: 'unknown' }), /invalid groupBy/)
+  assert.throws(() => rt.aggregate(input, { groupBy: 'family', sum: 'quality' }), /sum requires a numeric property/)
+  const grouped = rt.aggregate(input, { groupBy: 'family' })
+  assert.throws(() => rt.filter(grouped, [{ property: 'sum', op: 'gt', value: 0 }]), z.ZodError)
+  assert.deepEqual(ids(rt.filter(grouped, (row) => typeof row.count === 'number' && row.count >= 2).set), ['L1', 'L2', 'L3'])
+  assert.deepEqual(rt.auditLog(), [], 'query errors never perform writes or audit actions')
+})

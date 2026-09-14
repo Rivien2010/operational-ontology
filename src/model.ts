@@ -1,8 +1,8 @@
 /**
- * The model as data, its instance values, and the types derived from it.
- * Read from definitions to edit plans, then to the model-derived types below.
- * Definition helpers retain literal names and Zod schemas for inference;
- * they describe the ontology without creating a store or running operations.
+ * The model as data, its instance values, and edit plans.
+ * Definition helpers give business rules their property and parameter types.
+ * Runtime inputs are checked against these schemas when operations run;
+ * TypeScript does not build a navigation menu from the model.
  */
 import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
@@ -115,9 +115,9 @@ export function isPlainJson(value: unknown): boolean {
  * `from` and `to` give it an orientation; either end can be a query's starting
  * point. Cardinality constrains stored relationships, not traversal direction.
  */
-export interface LinkTypeDef<From extends string = string, To extends string = string> {
-  from: From
-  to: To
+export interface LinkTypeDef {
+  from: string
+  to: string
   /**
    * Cardinality is a model constraint, so it is enforced at the write gate:
    * for one-to-many, the "many" side belongs to at most one "one" side.
@@ -136,10 +136,8 @@ export interface LinkTypeDef<From extends string = string, To extends string = s
   description?: string
 }
 
-/** Retain literal endpoint names; defineOntology checks them against the assembled model. */
-export function defineLink<From extends string, To extends string>(
-  def: LinkTypeDef<From, To>,
-): LinkTypeDef<From, To> {
+/** defineOntology checks the endpoints against the assembled model. */
+export function defineLink(def: LinkTypeDef): LinkTypeDef {
   return def
 }
 
@@ -168,12 +166,8 @@ export type Edit =
 export type ActionResult = { ok: true; edits: Edit[] } | { ok: false; error: Violation }
 
 /** Describe a change to an instance; only running an action applies it. */
-// Infer the properties from the instance. A patch such as { status: 'lost' }
-// must not widen Order's status to make an invalid change fit.
-// NoInfer makes the patch use that inferred type without helping to choose it.
-export const modify = <Instance extends ObjectInstance>(
-  object: Instance, changes: NoInfer<Partial<Instance['properties']>>,
-): Edit => ({
+// Property names and values are checked during preflight, like create/link.
+export const modify = (object: ObjectInstance, changes: Record<string, unknown>): Edit => ({
   op: 'modify',
   object: object.type,
   pk: object.pk,
@@ -272,10 +266,7 @@ export function defineFunction<S extends Properties, Result>(def: FunctionDef<S,
 export interface OntologyDef {
   name: string
   objects: ObjectDefinitions
-  // `any` ends, not `string`: as the contextual type of a definition literal,
-  // `LinkTypeDef<string, string>` would widen the literal names a nested
-  // defineLink() call inferred — and the model-derived types below need them.
-  links: Record<string, LinkTypeDef<any, any>>
+  links: Record<string, LinkTypeDef>
   actions: Record<string, ActionDef<any, any>>
   functions?: Record<string, FunctionDef<any, any>>
 }
@@ -306,76 +297,19 @@ export function defineOntology<Model extends OntologyDef>(def: Model): Model {
   return def
 }
 
-// ── Model-derived types: names, schemas, and the ends of a link ──
-// Examples below use customerOrders (Customer → Order) and manages (Employee → Employee).
-// See tests/types.test.ts for accepted and rejected calls using this model.
-
+// Simple result lookups keep examples readable without constraining input names.
+// A dynamic name has an unknown result; schemas still check values at runtime.
 type ObjectDefinitions = Record<string, ObjectTypeDef<any>>
 type PropertiesOf<Definition extends ObjectTypeDef<any>> = z.output<z.ZodObject<Definition['properties']>>
-// Dictionary keys become string literal unions: the editor's name candidates.
-// These types guide TypeScript callers; schemas still validate runtime inputs.
-export type ObjectName<Model extends OntologyDef> = keyof Model['objects'] & string
-export type LinkName<Model extends OntologyDef> = keyof Model['links'] & string
-export type ActionName<Model extends OntologyDef> = keyof Model['actions'] & string
-export type FunctionName<Model extends OntologyDef> = keyof NonNullable<Model['functions']> & string
-export type OperationName<Model extends OntologyDef> = ActionName<Model> | FunctionName<Model>
-/** Select a name first; its definition determines both params and result. */
-export type OperationParamsOf<Model extends OntologyDef, Name extends OperationName<Model>> =
-  Name extends ActionName<Model> ? ParamsOf<Model, Name>
-    : Name extends FunctionName<Model> ? z.input<z.ZodObject<NonNullable<Model['functions']>[Name]['params']>>
-      : never
-export type OperationResultOf<Model extends OntologyDef, Name extends OperationName<Model>> =
-  Name extends ActionName<Model> ? ActionResult
-    : Name extends FunctionName<Model> ? ReturnType<NonNullable<Model['functions']>[Name]['run']>
-      : never
+export type ObjectOf<Model extends OntologyDef, Name extends string> =
+  Name extends keyof Model['objects'] ? ObjectInstance<Name, PropertiesOf<Model['objects'][Name]>> : ObjectInstance
+export type OperationResultOf<Model extends OntologyDef, Name extends string> =
+  Name extends keyof Model['actions'] ? ActionResult
+    : Name extends keyof NonNullable<Model['functions']> ? ReturnType<NonNullable<Model['functions']>[Name]['run']>
+      : unknown
 export type Direction = 'forward' | 'reverse'
-
-/**
- * 'Order' → an instance with type: 'Order' and Order's properties.
- * For 'Customer' | 'Order', build each instance type before forming the union:
- * a Customer tag must stay paired with Customer properties, and likewise for Order.
- */
-export type ObjectOf<Model extends OntologyDef, Name extends ObjectName<Model>> = {
-  [TypeName in Name]: ObjectInstance<TypeName, PropertiesOf<Model['objects'][TypeName]>>
-}[Name]
-/**
- * 'cancelOrder' → its input params, e.g. { orderId: string; reason: string }.
- * z.input is what callers supply; callbacks receive z.output after parsing.
- * For example, a defaulted parameter can be omitted by the caller.
- */
-export type ParamsOf<Model extends OntologyDef, Action extends ActionName<Model>> =
-  z.input<z.ZodObject<Model['actions'][Action]['params']>>
-
-/**
- * Customer or Order → 'customerOrders'; Employee → 'manages'. Either endpoint counts.
- * Map each link to its name or never, then index the map to collect its values.
- * `never` disappears from that union, removing links unrelated to the source.
- */
-export type LinksFrom<Model extends OntologyDef, Source extends ObjectName<Model>> = {
-  [Link in LinkName<Model>]: Source extends Model['links'][Link]['from'] | Model['links'][Link]['to'] ? Link : never
-}[LinkName<Model>]
-/** customerOrders: Customer → 'forward', Order → 'reverse'. manages: Employee → both. */
-export type LinkDirections<Model extends OntologyDef, Source extends ObjectName<Model>, Link extends LinkName<Model>> =
-  | (Source extends Model['links'][Link]['from'] ? 'forward' : never)
-  | (Source extends Model['links'][Link]['to'] ? 'reverse' : never)
-
-/** customerOrders: Customer → 'Order', Order → 'Customer'. manages: Employee → 'Employee'. */
-export type LinkTarget<Model extends OntologyDef, Source extends ObjectName<Model>, Link extends LinkName<Model>> =
-  Link extends LinkName<Model>
-    ? (Source extends Model['links'][Link]['from'] ? Model['links'][Link]['to'] : never)
-      | (Source extends Model['links'][Link]['to'] ? Model['links'][Link]['from'] : never)
-    : never
-
-/**
- * If the allowed directions include both choices, direction is required.
- * Customer + customerOrders → direction?: 'forward'. Employee + manages → direction: Direction.
- * Checking whether the whole Direction union fits detects the ambiguous case.
- * This depends on the schema, even when no instances currently have that link.
- */
-export type TraverseOptions<Model extends OntologyDef, Source extends ObjectName<Model>, Link extends LinkName<Model>> =
-  { actor: string } & (Direction extends LinkDirections<Model, Source, Link>
-    ? { direction: LinkDirections<Model, Source, Link> }
-    : { direction?: LinkDirections<Model, Source, Link> })
+/** Omit direction when only one end fits; Runtime rejects ambiguous or impossible choices. */
+export interface TraverseOptions { actor: string; direction?: Direction }
 
 /**
  * One attempted action, applied or rejected — the instance to an ActionDef's

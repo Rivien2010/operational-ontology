@@ -121,7 +121,7 @@ export function createFactoryOntology(read: () => FactoryRead) {
           })
           const aggregation = aggregationResult(customers, { affectedUnits: 'number', shipmentCount: 'number' }, evidence.map((row) => ({
             key: row.customerId, pks: [row.customerId],
-            affectedUnits: row.lines.objects.reduce((sum, line) => sum + line.properties.units, 0),
+            affectedUnits: row.lines.objects.reduce((sum, line) => sum + (line.properties.units as number), 0),
             shipmentCount: read().pivot(row.lines, 'shipmentLines', { actor }).objects.length,
           })))
           return { aggregation, evidence }

@@ -8,43 +8,16 @@
 import { z } from 'zod'
 import type { ObjectInstance, Properties } from './model.js'
 
-/**
- * Pair each tag with its objects before forming a union. Empty sets keep their tag.
- * Extract selects only instances of K: ObjectSet<Lot | Equipment> is a choice
- * between two homogeneous sets, not one array mixing both kinds of object.
- */
-export type ObjectSet<O extends ObjectInstance = ObjectInstance> = {
-  [K in O['type']]: { readonly type: K; readonly objects: readonly Extract<O, { type: K }>[] }
-}[O['type']]
-
+/** A tagged collection of snapshots. objectSet checks tags and deduplicates IDs. */
+export interface ObjectSet<O extends ObjectInstance = ObjectInstance> {
+  readonly type: string
+  readonly objects: readonly O[]
+}
 type Scalar = string | number | boolean
-type Comparison<V> = { op: 'eq' | 'ne'; value: V } | { op: 'in'; value: readonly V[] }
-type Ordered<V> = { op: 'gt' | 'gte' | 'lt' | 'lte'; value: V }
-// Wrappers preserve a field's query operators, but do not introduce comparisons
-// with null or missing values. Those cases are outside this query contract.
-type Unwrap<S> = S extends z.ZodOptional<infer I> | z.ZodNullable<infer I> | z.ZodDefault<infer I> ? Unwrap<I> : S
-type QuerySchema = z.ZodString | z.ZodEnum<any> | z.ZodNumber | z.ZodBoolean | z.ZodLiteral | z.ZodISODateTime | z.ZodISODate
-// [V] checks the union as a whole instead of each alternative separately.
-// An enum's `in` can therefore contain several of its allowed string values.
-type ScalarOperators<V> = [V] extends [never] ? never
-  : [V] extends [number] ? Comparison<number> | Ordered<number>
-  : [V] extends [string] ? Comparison<V> | { op: 'contains'; value: string }
-  : [V] extends [boolean] ? Comparison<boolean> : never
-// ISO dates are strings in TypeScript. Keep the Zod schema here so only date
-// schemas, rather than arbitrary strings, also offer ordered comparisons.
-type Operators<S> = S extends z.ZodType ? Unwrap<S> extends QuerySchema
-  ? Unwrap<S> extends z.ZodISODateTime | z.ZodISODate ? Comparison<string> | Ordered<string>
-    : ScalarOperators<Exclude<z.output<S>, null | undefined>>
-  : never : never
-
-/** Each union member pairs one property with its own operators and value type. */
-export type Where<S extends Properties> = readonly {
-  [K in keyof S & string]: { property: K } & Operators<S[K]>
-}[keyof S & string][]
-// Local code may use a synchronous, pure callback; MCP accepts serializable clauses.
-export type ObjectFilter<O extends ObjectInstance, S extends Properties = Properties> =
-  Where<S> | ((object: O) => boolean)
-export type MetricWhere<C extends string> = readonly ({ property: C } & (Comparison<number> | Ordered<number>))[]
+/** These are data, not model-derived type expressions; whereSchema validates each clause. */
+export interface Condition { property: string; op: 'eq' | 'ne' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'; value: unknown }
+export type Where = readonly Condition[]
+export type ObjectFilter<O extends ObjectInstance = ObjectInstance> = Where | ((object: O) => boolean)
 
 /**
  * `set` holds the target objects; each row's `pks` associates metrics with members
@@ -53,36 +26,26 @@ export type MetricWhere<C extends string> = readonly ({ property: C } & (Compari
  * For metrics derived from other objects (e.g. transfers for an account), a
  * Function returns that evidence separately; pks here still identify set members.
  */
-export interface AggregationResult<O extends ObjectInstance = ObjectInstance, C extends string = never> {
+export interface AggregationResult<O extends ObjectInstance = ObjectInstance> {
   readonly set: ObjectSet<O>
-  readonly columns: Readonly<Record<C, 'number'>>
-  readonly values: readonly ({ readonly key: Scalar; readonly pks: readonly string[] } & Readonly<Record<C, number>>)[]
+  readonly columns: Readonly<Record<string, 'number'>>
+  readonly values: readonly AggregationRow[]
+}
+/** Group identity is fixed; the declared metric names are runtime data. */
+export interface AggregationRow {
+  readonly key: Scalar
+  readonly pks: readonly string[]
+  readonly [column: string]: unknown
 }
 
-// Keep supported scalar fields for grouping, then only numeric fields for sums.
-// Mapping unsupported fields to never removes them from the editor's candidates.
-export type GroupProperty<S extends Properties> = {
-  [K in keyof S & string]: [Operators<S[K]>] extends [never] ? never : K
-}[keyof S & string]
-export type SumProperty<S extends Properties> = {
-  [K in GroupProperty<S>]: Exclude<z.output<S[K]>, null | undefined> extends number ? K : never
-}[GroupProperty<S>]
-
-/** Broad internal shape; whereSchema checks the actual property/operator/value pairing. */
-export interface Condition { property: string; op: 'eq' | 'ne' | 'in' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte'; value: unknown }
 const own = (value: object, key: string) => Object.hasOwn(value, key)
 const scalar = (v: unknown): v is Scalar => typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))
 
 /**
- * A small constructor also used by model Functions. First occurrence wins.
- * NoInfer makes objects follow the supplied tag instead of widening it to fit.
- * The direct return shape retains K even for an empty array inferred as never[].
- * This checks instance shape and identity, not the business property schema.
- * It creates a new array, sharing the snapshots rather than deeply copying them.
+ * Build a fresh collection, preserving the first snapshot for each ID.
+ * Tag/element agreement is a runtime check, including caller-constructed sets.
  */
-export function objectSet<K extends string, O extends ObjectInstance<NoInfer<K>>>(
-  type: K, objects: readonly O[],
-): { readonly type: K; readonly objects: readonly O[] } {
+export function objectSet<O extends ObjectInstance>(type: string, objects: readonly O[]): ObjectSet<O> {
   if (typeof type !== 'string' || !Array.isArray(objects)) throw new Error('invalid object set')
   const unique = new Map<string, O>()
   for (const object of objects) {
@@ -97,17 +60,17 @@ export function objectSet<K extends string, O extends ObjectInstance<NoInfer<K>>
 }
 
 /** Same-type identity operations; preserve left-hand order and snapshots when IDs overlap. */
-export function combine<O extends ObjectInstance>(op: 'union' | 'intersect' | 'subtract', a: ObjectSet<O>, b: ObjectSet<O>): ObjectSet<O> {
+export function combine(op: 'union' | 'intersect' | 'subtract', a: ObjectSet, b: ObjectSet): ObjectSet {
   if (a.type !== b.type) throw new Error('set operations require the same object type')
   const left = objectSet(a.type, a.objects)
   const right = objectSet(b.type, b.objects)
   const ids = new Set(right.objects.map((o) => o.pk))
   return objectSet(a.type, op === 'union' ? [...left.objects, ...right.objects]
-    : left.objects.filter((o) => op === 'intersect' ? ids.has(o.pk) : !ids.has(o.pk))) as ObjectSet<O>
+    : left.objects.filter((o) => op === 'intersect' ? ids.has(o.pk) : !ids.has(o.pk)))
 }
 
 /**
- * Runtime counterpart of Operators: keep both aligned when adding a field kind.
+ * Classify stored fields for condition validation and MCP input schemas.
  * Query values need not satisfy every stored-value constraint: a nonnegative
  * amount can still be compared with -1. String enums retain their choice hints.
  */
@@ -194,19 +157,19 @@ export function filterObjects<O extends ObjectInstance>(set: ObjectSet<O>, where
   const input = objectSet(set.type, set.objects)
   const matches = typeof where === 'function' ? where as (o: O) => boolean
     : ((test) => (o: O) => test(o.properties))(predicate(properties, where))
-  return objectSet(set.type, input.objects.filter(matches)) as ObjectSet<O>
+  return objectSet(set.type, input.objects.filter(matches))
 }
 
 /**
  * Attach metrics to a set without putting derived values in business properties.
  * Validate declared columns and group membership, then retain only referenced
  * objects. Groups may overlap; their combined target set still has unique IDs.
- * NoInfer prevents row values from inventing columns absent from `columns`.
+ * Columns and membership are validated even for caller-constructed results.
  */
-export function aggregationResult<O extends ObjectInstance, C extends string>(
-  set: ObjectSet<O>, columns: Readonly<Record<C, 'number'>>,
-  values: AggregationResult<O, NoInfer<C>>['values'],
-): AggregationResult<O, C> {
+export function aggregationResult<O extends ObjectInstance>(
+  set: ObjectSet<O>, columns: Readonly<Record<string, 'number'>>,
+  values: readonly AggregationRow[],
+): AggregationResult<O> {
   const input = objectSet(set.type, set.objects)
   const known = new Set(input.objects.map((o) => o.pk))
   const included = new Set<string>()
@@ -233,7 +196,7 @@ export function aggregationResult<O extends ObjectInstance, C extends string>(
     if (Object.keys(row).some((key) => key !== 'key' && key !== 'pks' && !own(columns, key))) throw new Error('undeclared metric column')
     return { ...row, pks }
   })
-  return { set: objectSet(set.type, input.objects.filter((o) => included.has(o.pk))) as ObjectSet<O>, columns: { ...columns }, values: rows }
+  return { set: objectSet(set.type, input.objects.filter((o) => included.has(o.pk))), columns: { ...columns }, values: rows }
 }
 
 /**
@@ -241,9 +204,9 @@ export function aggregationResult<O extends ObjectInstance, C extends string>(
  * are unchanged; filtering .set by object properties and aggregating again is
  * a separate operation when a newly calculated total is wanted.
  */
-export function filterAggregation<O extends ObjectInstance, C extends string>(
-  input: AggregationResult<O, C>, where: MetricWhere<NoInfer<C>> | ((row: Readonly<Record<C, number>>) => boolean),
-): AggregationResult<O, C> {
+export function filterAggregation<O extends ObjectInstance>(
+  input: AggregationResult<O>, where: Where | ((row: AggregationRow) => boolean),
+): AggregationResult<O> {
   const result = aggregationResult(input.set, input.columns, input.values)
   const test = typeof where === 'function' ? where : predicate(
     Object.fromEntries(Object.keys(result.columns).map((column) => [column, z.number()])), where,
@@ -254,7 +217,7 @@ export function filterAggregation<O extends ObjectInstance, C extends string>(
 /** Group existing snapshots by one property, retaining each group's members. */
 export function aggregate<O extends ObjectInstance>(
   set: ObjectSet<O>, options: { groupBy: string; sum?: string }, properties: Properties,
-): AggregationResult<O, 'count' | 'sum'> | AggregationResult<O, 'count'> {
+): AggregationResult<O> {
   if (!own(properties, options.groupBy) || !fieldInfo(properties[options.groupBy])) throw new Error('invalid groupBy property')
   if (options.sum !== undefined && (!own(properties, options.sum) || fieldInfo(properties[options.sum])?.kind !== 'number')) {
     throw new Error('sum requires a numeric property')
@@ -277,8 +240,6 @@ export function aggregate<O extends ObjectInstance>(
     groups.set(key, row)
   }
   const values = [...groups.values()]
-  // The loop creates sum on every row exactly when requested. The assertion
-  // expresses that relationship, which the optional field alone cannot convey.
   return options.sum === undefined ? aggregationResult(input, { count: 'number' }, values)
-    : aggregationResult(input, { count: 'number', sum: 'number' }, values as AggregationResult<O, 'count' | 'sum'>['values'])
+    : aggregationResult(input, { count: 'number', sum: 'number' }, values)
 }

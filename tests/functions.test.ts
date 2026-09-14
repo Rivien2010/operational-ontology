@@ -28,7 +28,6 @@ test('model functions validate inputs before running, pass the actor, and do not
   assert.throws(() => rt.run('label', { prefix: '', count: 2 }, { actor: 'user:bob' }), z.ZodError)
   assert.deepEqual(observed, ['user:alice'], 'invalid params must not reach model code')
   assert.throws(() => rt.run('broken', {}, { actor: 'user:alice' }), /function crashed/)
-  // @ts-expect-error exercise dynamic callers and the prototype-name boundary
   assert.throws(() => rt.run('toString', {}, { actor: 'user:alice' }), /unknown operation/)
   assert.deepEqual(rt.auditLog(), [])
 })

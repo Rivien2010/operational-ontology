@@ -160,7 +160,6 @@ const ontology = defineOntology({
       targetParam: 'orderId',
       params: { orderId: z.string() },
       preconditions: [],
-      // @ts-expect-error exercise the runtime gate with an invalid enum value
       effects: ({ object }) => [modify(object, { status: 'bogus' })],
       writeback: true,
     }),
@@ -170,7 +169,6 @@ const ontology = defineOntology({
       targetParam: 'orderId',
       params: { orderId: z.string() },
       preconditions: [],
-      // @ts-expect-error exercise the runtime gate with an unknown property
       effects: ({ object }) => [modify(object, { vaporware: 1 })],
       writeback: true,
     }),
@@ -188,7 +186,6 @@ const ontology = defineOntology({
       targetParam: 'orderId',
       params: { orderId: z.string() },
       preconditions: [],
-      // @ts-expect-error exercise the runtime gate with a prototype property
       effects: ({ object }) => [modify(object, { toString: 'gotcha' })],
       writeback: true,
     }),
@@ -253,7 +250,6 @@ const ontology = defineOntology({
       targetParam: 'orderId',
       params: { orderId: z.string() },
       preconditions: [],
-      // @ts-expect-error exercise the runtime gate with an invalid enum value
       effects: ({ object }) => [modify(object, { status: 'bogus' })],
     }),
     sloppierReassign: defineAction(objects, {
@@ -426,8 +422,7 @@ test('a missing target is refused', () => {
 
 test('an unknown operation throws without inventing an action attempt', () => {
   const rt = setup()
-  // Dynamic callers still receive an error if they bypass the model-derived types.
-  // @ts-expect-error unknown operation name
+  // Unknown names fail before entering the Action gate, regardless of caller types.
   assert.throws(() => rt.run('dropAllTables', {}, { actor: 'test' }), /unknown operation/)
   assert.deepEqual(rt.auditLog(), [])
 })
@@ -444,12 +439,10 @@ test('params the audit log cannot hold are refused — and still audited', () =>
   const rt = setup()
   // A BigInt survives no JSON round trip: the params are refused before the
   // model runs, and the audit write records a placeholder instead of crashing.
-  // @ts-expect-error a BigInt is not a string — the type says so; the runtime must too
   const result = rt.run('cancelOrder', { orderId: 'O2', reason: 10n }, { actor: 'test' })
   assert.equal(result.ok, false)
   if (!result.ok) assert.equal(result.error.code, 'INVALID_PARAMS')
   // Unknown names are rejected before inspecting even unserializable params.
-  // @ts-expect-error unknown operation name
   assert.throws(() => rt.run('dropAllTables', { n: 10n }, { actor: 'test' }), /unknown operation/)
   const rejected = rt.auditLog({ status: 'rejected' })
   assert.deepEqual(rejected.map((e) => e.error?.code), ['INVALID_PARAMS'])
@@ -979,11 +972,8 @@ test('the primary key cannot be modified', () => {
 
 test('prototype names are not operations, objects, or links', () => {
   const rt = setup()
-  // @ts-expect-error not an action name
   assert.throws(() => rt.run('toString', {}, { actor: 'test' }), /unknown operation/)
-  // @ts-expect-error not an object type name
   assert.throws(() => rt.get('toString', 'x', asTest), /unknown object type/)
-  // @ts-expect-error not a link type name
   assert.throws(() => rt.traverse(rt.get('Customer', 'C1', asTest)!, 'toString', asTest).objects, /unknown link type/)
   // …and not link types inside an edit plan either — refused before the
   // adapter could ever see the plan.

@@ -14,10 +14,10 @@
 
 `outgoing` と `incoming` は別々の Account → Transfer リンクです。Transfer は ID・日時・整数の円金額を持つオブジェクトなので、口座へ pivot する段階までは複数回の送金と時刻を保持できます。
 
-**[▶ オントロジーの捜査型分析解説｜金融編（日本語音声・6:40）](https://www.youtube.com/watch?v=8JwF0oU-idc)**
+**[▶ オントロジーの捜査型分析解説｜金融編（日本語音声・8:39）](https://www.youtube.com/watch?v=RbHd2pjrW-k)**
 
-<a href="https://www.youtube.com/watch?v=8JwF0oU-idc">
-  <img src="https://i.ytimg.com/vi/8JwF0oU-idc/maxresdefault.jpg" alt="オントロジーの捜査型分析解説｜金融編" width="640">
+<a href="https://www.youtube.com/watch?v=RbHd2pjrW-k">
+  <img src="https://i.ytimg.com/vi/RbHd2pjrW-k/maxresdefault.jpg" alt="オントロジーの捜査型分析解説｜金融編" width="640">
 </a>
 
 動画の制作時点と API が異なります。現在の呼び出し方は [`demo.ts`](./demo.ts) を参照してください。

@@ -12,10 +12,10 @@
 
 オレンジの仮割当リンクは最初は存在せず、候補検索ではなく割当の Action が作ります。
 
-**[▶ オントロジーの捜査型分析解説｜病院編（日本語音声・5:48）](https://www.youtube.com/watch?v=rDBCEIlDfhE)**
+**[▶ オントロジーの捜査型分析解説｜病院編（日本語音声・8:17）](https://www.youtube.com/watch?v=CoxjBmIpGMo)**
 
-<a href="https://www.youtube.com/watch?v=rDBCEIlDfhE">
-  <img src="https://i.ytimg.com/vi/rDBCEIlDfhE/maxresdefault.jpg" alt="オントロジーの捜査型分析解説｜病院編" width="640">
+<a href="https://www.youtube.com/watch?v=CoxjBmIpGMo">
+  <img src="https://i.ytimg.com/vi/CoxjBmIpGMo/maxresdefault.jpg" alt="オントロジーの捜査型分析解説｜病院編" width="640">
 </a>
 
 動画の制作時点と API が異なります。現在の呼び出し方は [`demo.ts`](./demo.ts) を参照してください。

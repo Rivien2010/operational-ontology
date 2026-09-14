@@ -14,10 +14,10 @@ Gray: source-backed state. Orange: ontology-owned state. The diagram shows all o
 
 `outgoing` and `incoming` are separate Account → Transfer links. Transfer is an object with an ID, timestamp and integer yen amount, so repeated transfers and their timing survive until the investigator chooses to pivot to accounts.
 
-**[▶ Ontology: Investigative Analysis Explained | Finance (English narration, 6:36)](https://www.youtube.com/watch?v=4urBRngmnuA)**
+**[▶ Ontology: Investigative Analysis Explained | Finance (English narration, 8:33)](https://www.youtube.com/watch?v=WOcqXcSs388)**
 
-<a href="https://www.youtube.com/watch?v=4urBRngmnuA">
-  <img src="https://i.ytimg.com/vi/4urBRngmnuA/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Finance" width="640">
+<a href="https://www.youtube.com/watch?v=WOcqXcSs388">
+  <img src="https://i.ytimg.com/vi/WOcqXcSs388/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Finance" width="640">
 </a>
 
 The API differs from the version used to make the video. See [`demo.ts`](./demo.ts) for current calls.

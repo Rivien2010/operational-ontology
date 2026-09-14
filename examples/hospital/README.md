@@ -12,10 +12,10 @@ Gray: source-backed state. Orange: ontology-owned state. The diagram shows all o
 
 The orange allocation links are absent initially. They are created by the allocation Action, not by candidate search.
 
-**[▶ Ontology: Investigative Analysis Explained | Hospital (English narration, 5:48)](https://www.youtube.com/watch?v=cXEIbE-2abs)**
+**[▶ Ontology: Investigative Analysis Explained | Hospital (English narration, 8:16)](https://www.youtube.com/watch?v=ubdg14M7wxw)**
 
-<a href="https://www.youtube.com/watch?v=cXEIbE-2abs">
-  <img src="https://i.ytimg.com/vi/cXEIbE-2abs/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Hospital" width="640">
+<a href="https://www.youtube.com/watch?v=ubdg14M7wxw">
+  <img src="https://i.ytimg.com/vi/ubdg14M7wxw/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Hospital" width="640">
 </a>
 
 The API differs from the version used to make the video. See [`demo.ts`](./demo.ts) for current calls.

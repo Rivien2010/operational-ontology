@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1230" role="img" aria-labelledby="title desc">
+  <title id="title">Finance: find shared recipients, retain evidence</title>
+  <desc id="desc">Finance schema with Account, Transfer and ontology-owned Investigation. Account has separate outgoing and incoming links to Transfer. accountInvestigations links a target Account to a case; investigationOrigins and investigationTransfers preserve origins and evidence. recipientSummary returns scoped account metrics and evidence. openInvestigation records a case after validating the selected transfers. Selected properties only.</desc>
+  <!-- Edit this SVG, then export its PNG at 2x with:
+       rsvg-convert -w 2400 -o ontology-overview.png ontology-overview.svg -->
+  <defs>
+    <style>text { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }</style>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#5B626B"/></marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#C96A00"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1200" height="1230" rx="0" fill="#FFFFFF"/>
+  <text x="54" y="65" text-anchor="start" font-size="29" font-weight="760" fill="#20242A">Finance: find shared recipients, retain evidence</text>
+  <text x="54" y="101" text-anchor="start" font-size="19" font-weight="500" fill="#747B84">3 object types · 5 link types · 1 Function · 1 Action</text>
+  <rect x="54" y="140" width="1092" height="630" rx="30" fill="#FFFFFF" stroke="#20242A" stroke-width="3"/>
+  <text x="84" y="183" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">OBJECT TYPES &amp; LINKS</text>
+  <text x="1116" y="183" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Selected properties · primary key: id</text>
+  <!-- Schema arrows are declared from → to; they are not an exploration sequence. -->
+  <g data-link="outgoing" data-from="Account" data-to="Transfer" data-kind="one-to-many">
+  <path d="M 408 274 H 816" fill="none" stroke="#5B626B" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-gray)"/>
+  <text x="612" y="256" text-anchor="middle" font-size="17" font-weight="650" fill="#5B626B">outgoing</text>
+  <text x="612" y="300" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">1:N · sender role</text>
+  </g>
+  <g data-link="incoming" data-from="Account" data-to="Transfer" data-kind="one-to-many">
+  <path d="M 408 344 H 816" fill="none" stroke="#5B626B" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-gray)"/>
+  <text x="612" y="326" text-anchor="middle" font-size="17" font-weight="650" fill="#5B626B">incoming</text>
+  <text x="612" y="370" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">1:N · recipient role</text>
+  </g>
+  <g data-link="accountInvestigations" data-from="Account" data-to="Investigation" data-kind="one-to-many">
+  <path d="M 240 379 V 603 H 450" fill="none" stroke="#C96A00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <rect x="122.5" y="437" width="235" height="54" rx="6" fill="#FFFFFF"/>
+  <text x="240" y="459" text-anchor="middle" font-size="17" font-weight="650" fill="#C96A00">accountInvestigations</text>
+  <text x="240" y="483" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">1:N</text>
+  </g>
+  <g data-link="investigationOrigins" data-from="Investigation" data-to="Account" data-kind="many-to-many">
+  <path d="M 560 548 V 441 H 365 V 379" fill="none" stroke="#C96A00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <text x="490" y="422" text-anchor="middle" font-size="15.5" font-weight="650" fill="#C96A00">investigationOrigins</text>
+  <text x="490" y="466" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">M:N</text>
+  </g>
+  <g data-link="investigationTransfers" data-from="Investigation" data-to="Transfer" data-kind="many-to-many">
+  <path d="M 750 603 H 964 V 379" fill="none" stroke="#C96A00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow-orange)"/>
+  <rect x="846.0" y="456" width="236" height="54" rx="6" fill="#FFFFFF"/>
+  <text x="964" y="478" text-anchor="middle" font-size="17" font-weight="650" fill="#C96A00">investigationTransfers</text>
+  <text x="964" y="502" text-anchor="middle" font-size="15" font-weight="500" fill="#747B84">M:N</text>
+  </g>
+  <g data-object="Account" data-properties="holder context">
+  <rect x="94" y="230" width="314" height="149" rx="21" fill="#F8F9FA" stroke="#343A42" stroke-width="2.5"/>
+  <text x="114" y="265" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Account</text>
+  <text x="114" y="294" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">holder · context</text>
+  <text x="114" y="318" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">Sender, recipient, origin or target</text>
+  </g>
+  <g data-object="Transfer" data-properties="occurredAt amount">
+  <rect x="816" y="230" width="300" height="149" rx="21" fill="#F8F9FA" stroke="#343A42" stroke-width="2.5"/>
+  <text x="836" y="265" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Transfer</text>
+  <text x="836" y="294" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">occurredAt · amount</text>
+  <text x="836" y="318" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">One record per transfer</text>
+  </g>
+  <g data-object="Investigation" data-properties="reason after before">
+  <rect x="450" y="548" width="300" height="105" rx="21" fill="#FFF1DE" stroke="#C96A00" stroke-width="2.5"/>
+  <text x="470" y="583" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">Investigation</text>
+  <text x="470" y="612" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">reason · after · before</text>
+  </g>
+  <text x="600" y="691" text-anchor="middle" font-size="17" font-weight="500" fill="#5B626B">One Account type, with different roles in the investigation.</text>
+  <!-- Ownership colors match the main README authority map. -->
+  <path d="M 84 720 H 120" stroke="#5B626B" stroke-width="3" marker-end="url(#arrow-gray)"/>
+  <text x="133" y="725" text-anchor="start" font-size="17" font-weight="600" fill="#5B626B">source-backed</text>
+  <path d="M 320 720 H 356" stroke="#C96A00" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <text x="369" y="725" text-anchor="start" font-size="17" font-weight="600" fill="#C96A00">ontology-owned</text>
+  <text x="655" y="725" text-anchor="start" font-size="17" font-weight="500" fill="#5B626B">Arrows show declared from → to.</text>
+  <text x="84" y="751" text-anchor="start" font-size="16" font-weight="500" fill="#747B84">1:N = one-to-many · M:N = many-to-many</text>
+  <text x="655" y="751" text-anchor="start" font-size="16" font-weight="500" fill="#747B84">Pivot can follow either end of a link.</text>
+  <text x="54" y="812" text-anchor="start" font-size="17" font-weight="760" fill="#20242A" letter-spacing="1.2">MODEL OPERATIONS</text>
+  <rect x="54" y="835" width="530" height="314" rx="24" fill="#F8F9FA" stroke="#5B626B" stroke-width="2.5"/>
+  <rect x="610" y="835" width="536" height="314" rx="24" fill="#FFF1DE" stroke="#C96A00" stroke-width="2.5"/>
+  <text x="80" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#5B626B" letter-spacing="1">FUNCTION · READ ONLY</text>
+  <path d="M 644 853 L 656 866 L 644 879 L 632 866 Z" fill="#FFFFFF" stroke="#C96A00" stroke-width="2"/>
+  <text x="670" y="872" text-anchor="start" font-size="16" font-weight="750" fill="#C96A00" letter-spacing="1">ACTION · RULES &amp; AUDIT</text>
+  <g data-function="recipientSummary">
+  <text x="80" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">recipientSummary</text>
+  <text x="80" y="950" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">originIds + after + before</text>
+  <text x="80" y="984" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">→ Account aggregation + evidence + scope</text>
+  <text x="80" y="1018" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Metrics: senderCount · transactionCount</text>
+  <text x="80" y="1052" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">totalAmount · evidence: Transfer / Account sets</text>
+  </g>
+  <text x="80" y="1122" text-anchor="start" font-size="17" font-weight="550" fill="#5B626B">Counts and amounts use scoped transfers.</text>
+  <g data-action="openInvestigation">
+  <text x="636" y="916" text-anchor="start" font-size="23" font-weight="730" fill="#20242A">openInvestigation</text>
+  <text x="636" y="954" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Account + origins + time window + transfer IDs</text>
+  <text x="636" y="988" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Recheck scope and recipient relationships.</text>
+  <text x="636" y="1022" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Create Investigation + 3 owned link types.</text>
+  <text x="636" y="1056" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Link the target, origins and evidence transfers.</text>
+  <text x="636" y="1122" text-anchor="start" font-size="17" font-weight="650" fill="#C96A00">Records an investigation; no account freeze.</text>
+  </g>
+  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">Trace transfers → compare recipients → inspect evidence → run the Action</text>
+  <text x="1146" y="1214" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Operational Ontology · finance example</text>
+</svg>

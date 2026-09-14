@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "finance": {
+      "command": "pnpm",
+      "args": [
+        "mcp:finance"
+      ],
+      "env": {
+        "OO_AGENT": "finance-demo"
+      }
+    }
+  }
+}

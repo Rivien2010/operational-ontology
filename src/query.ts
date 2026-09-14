@@ -6,7 +6,7 @@
  * Filtering an existing snapshot does not refresh it or recheck visibility.
  */
 import { z } from 'zod'
-import type { ObjectInstance, Properties } from './model.js'
+import type { ObjectInstance, Properties } from './core.js'
 
 /** A tagged collection of snapshots. objectSet checks tags and deduplicates IDs. */
 export interface ObjectSet<O extends ObjectInstance = ObjectInstance> {

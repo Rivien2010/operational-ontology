@@ -8,12 +8,11 @@ An action execution refusal returns `{ ok: false, error: { code, message } }` an
 
 ## Code organization
 
-The public entry point is `Runtime`. Its private methods also own persistence, so the Action gate and the edit/audit commit can be followed within `core.ts`. Pure operations on evaluated values remain in `query.ts`.
+`core.ts` contains model definitions, the write-back contract, and `Runtime`, in that order. Inside `Runtime`, indexing comes first, followed by reads, Action execution, audit reads, and internal helpers. Pure operations on evaluated sets are in `query.ts`.
 
 | File | Responsibility |
 | --- | --- |
-| `model.ts` | Definition helpers, instance shapes and edit plans. |
-| `core.ts` | Actor-scoped reads, Actions and Functions, SQLite persistence, indexing, integrity checks and transactions. |
+| `core.ts` | Definition helpers, instances, edit plans, and the Runtime that reads, executes, persists and audits them. |
 | `query.ts` | Pure operations on evaluated sets and aggregations, using caller-supplied predicates. |
 | `mcp.ts` | Generate tools from the model and adapt inputs to the same runtime operations. |
 

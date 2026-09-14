@@ -159,8 +159,7 @@ Start with the first three files; use the others to follow a particular part of 
 | --- | --- |
 | [`examples/orders/ontology.ts`](./examples/orders/ontology.ts) | The business model: objects, relationships, ownership, and action rules. |
 | [`examples/orders/demo.ts`](./examples/orders/demo.ts) | A caller exercising reads, successful writes, refusals, and re-indexing. |
-| [`src/core.ts`](./src/core.ts) | The interpreter and SQLite persistence: follow `execute()` through validation, write-back, and the edit/audit commit. |
-| [`src/model.ts`](./src/model.ts) | The definition helpers, instance shapes, and edit plans. |
+| [`src/core.ts`](./src/core.ts) | Model definitions and their runtime: follow `execute()` through validation, write-back, and the edit/audit commit. |
 | [`src/query.ts`](./src/query.ts) | Evaluated sets, filtering, set algebra, and aggregation. |
 | [`examples/orders/integrate.ts`](./examples/orders/integrate.ts) | How the two legacy schemas become one snapshot. |
 | [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | How an accepted change reaches its source, including refusal of a stale cancellation. |

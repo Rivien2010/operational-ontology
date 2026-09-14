@@ -46,9 +46,6 @@ test('finance distinguishes recipient intersection, distinct senders and repeate
 test('finance saves target, scope and evidence as a case; rejects unrelated evidence without partial writes', (t) => {
   const { rt, sources } = setup(t)
   const original = structuredClone(sources)
-  assert.equal(rt.preview('openInvestigation', request, { actor }).ok, true)
-  assert.deepEqual(rt.auditLog(), [])
-  assert.deepEqual(rt.search('Investigation', { actor }).objects, [])
   for (const transferIds of [['T2'], ['T8'], ['T9'], ['T10'], ['T1a', 'T1a']]) {
     assert.equal(rt.execute('openInvestigation', { ...request, transferIds }, { actor }).ok, false)
   }
@@ -72,7 +69,8 @@ test('finance saves target, scope and evidence as a case; rejects unrelated evid
 
 test('finance rechecks evidence relationships after a source correction', (t) => {
   const { rt, sources } = setup(t)
-  assert.equal(rt.preview('openInvestigation', request, { actor }).ok, true)
+  const summary = rt.call('recipientSummary', scope, { actor })
+  assert.deepEqual(ids(summary.evidence.find((e) => e.accountId === 'X')!.transfers.objects), request.transferIds)
   sources.transfers[0].recipient_id = 'Y'
   rt.load(integrate(sources))
   const result = rt.execute('openInvestigation', request, { actor })

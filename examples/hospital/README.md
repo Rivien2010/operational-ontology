@@ -18,6 +18,8 @@ The orange allocation links are absent initially. They are created by the alloca
   <img src="https://i.ytimg.com/vi/cXEIbE-2abs/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Hospital" width="640">
 </a>
 
+The API differs from the version used to make the video. See [`demo.ts`](./demo.ts) for current calls.
+
 For P1, `bedSearch` returns a Bed ObjectSet plus assessments of all beds in the same hospital:
 
 | Bed | Assessment |
@@ -35,9 +37,9 @@ const bed = beds.set.objects[0]
 const nurses = rt.call('nurseSearch', { patientId: 'P1', bedId: bed.pk }, { actor })
 ```
 
-The model shares its patient, bed and nurse evaluation functions with `allocate`. A complete Action can be previewed, then executed. It rechecks the selected combination and commits one ontology-owned Allocation plus its three links atomically. Patient/bed/nurse references are represented by those links, not duplicated in foreign-key properties.
+The model shares its patient, bed and nurse evaluation functions with `allocate`. After choosing a bed and nurse from the candidate results, the caller executes the Action. It rechecks the selected combination and commits one ontology-owned Allocation plus its three links atomically. Patient/bed/nurse references are represented by those links, not duplicated in foreign-key properties.
 
-The source patient remains `waiting`, the bed remains source-ready, and N1's source slot count remains 1. The stored plan is additional operational state. Candidate evaluation combines source reservations/readiness with existing plans: a planned bed is unavailable, and each plan consumes a nurse slot. Re-running `bedSearch` returns no bed for P1 because it has a plan, and no bed for P4 because the resource has been consumed. P1 and P4 can each pass preview for the same resources before either plan is applied. Once P1 is allocated, running the previously previewed plan for P4 is refused. A previously obtained candidate or preview is not a reservation. Source refresh preserves the plan and its links.
+The source patient remains `waiting`, the bed remains source-ready, and N1's source slot count remains 1. The stored plan is additional operational state. Candidate evaluation combines source reservations/readiness with existing plans: a planned bed is unavailable, and each plan consumes a nurse slot. Re-running `bedSearch` returns no bed for P1 because it has a plan, and no bed for P4 because the resource has been consumed. Before either plan is applied, candidate searches for P1 and P4 both return B101 and N1. Once P1 is allocated, attempting to allocate those resources to P4 is refused, even if they were selected from an earlier search. Candidate results are not reservations. Source refresh preserves the plan and its links.
 
 ## Scope and code
 

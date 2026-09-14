@@ -117,6 +117,6 @@
   <text x="636" y="1056" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">Later searches account for existing plans.</text>
   <text x="636" y="1122" text-anchor="start" font-size="17" font-weight="650" fill="#C96A00">Provisional plan; source state stays intact.</text>
   </g>
-  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">Explore → evaluate candidates → choose bed + nurse → preview → run the Action</text>
+  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">Explore → evaluate candidates → choose bed + nurse → run the Action</text>
   <text x="1146" y="1214" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Operational Ontology · hospital example</text>
 </svg>

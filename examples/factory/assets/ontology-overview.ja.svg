@@ -120,6 +120,6 @@
   <text x="636" y="1056" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">選んだロットと明細を根拠として保持する。</text>
   <text x="636" y="1122" text-anchor="start" font-size="17" font-weight="650" fill="#C96A00">タスクを記録。メッセージは送信しない。</text>
   </g>
-  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">探索 → 根拠を確認 → 顧客を選択 → preview → Action を実行</text>
+  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">探索 → 根拠を確認 → 顧客を選択 → Action を実行</text>
   <text x="1146" y="1214" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Operational Ontology · 工場の例</text>
 </svg>

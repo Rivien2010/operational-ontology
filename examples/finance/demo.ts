@@ -33,7 +33,6 @@ try {
     transferIds: evidence.transfers.objects.map((t) => t.pk),
     reason: 'Request invoices and payment purposes for the common recipient; a legitimate explanation remains possible',
   }
-  console.log('Preview:', rt.preview('openInvestigation', request, { actor }))
   console.log('Create case:', rt.execute('openInvestigation', request, { actor }))
   rt.load(integrate(app.sources))
   const saved = rt.get('Investigation', 'CASE-X', { actor })!

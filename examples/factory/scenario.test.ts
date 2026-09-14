@@ -37,7 +37,6 @@ test('factory investigates a supplied manufacturing window and records shipped-l
     customerId: 'C1', equipmentId: 'PRESS-1', taskId: 'TASK1', reason: 'Review contact and reinspection',
     after: '2026-09-06T00:00:00+09:00', before: '2026-09-07T00:00:00+09:00', lineIds: ids(lines.objects),
   }
-  assert.equal(rt.preview('createContactTask', params, { actor }).ok, true)
   assert.deepEqual(rt.auditLog(), [])
   assert.equal(rt.search('ContactTask', { actor }).objects.length, 0)
   for (const lineIds of [['SL2'], ['SL5'], ['SL6'], ['SL1', 'SL1']]) {

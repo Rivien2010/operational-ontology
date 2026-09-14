@@ -117,6 +117,6 @@
   <text x="636" y="1056" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">後の候補検索では既存の仮割当を考慮する。</text>
   <text x="636" y="1122" text-anchor="start" font-size="17" font-weight="650" fill="#C96A00">仮割当を記録。ソースの状態は変更しない。</text>
   </g>
-  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">探索 → 候補を評価 → 病床と看護師を選択 → preview → Action を実行</text>
+  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">探索 → 候補を評価 → 病床と看護師を選択 → Action を実行</text>
   <text x="1146" y="1214" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Operational Ontology · 病院の例</text>
 </svg>

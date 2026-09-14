@@ -20,6 +20,8 @@ Gray: source-backed state. Orange: ontology-owned state. The diagram shows all o
   <img src="https://i.ytimg.com/vi/4urBRngmnuA/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Finance" width="640">
 </a>
 
+The API differs from the version used to make the video. See [`demo.ts`](./demo.ts) for current calls.
+
 The demo follows outgoing transfers from each origin, filters September 8 afternoon, and pivots to recipients:
 
 | Origin | Recipients |
@@ -54,7 +56,7 @@ Filtering for at least two senders retains X and W, but the investigator chooses
 
 The investigator uses `openInvestigation` to create `CASE-X`, linking recipient X, origins A, B and C, and evidence transfers T1a, T1b, T3 and T4. The case records the time window and a reason: request invoices and payment purposes for the shared recipient. The investigator's next task is to obtain the documents corresponding to these four transfers and decide whether they explain the payments to the provider or warrant further investigation. Links back to the original transfers make it clear which payments need checking when the work is handed over.
 
-The Action checks that every selected transfer still comes from the supplied origins, falls in the time window and reaches the selected recipient. It creates an ontology-owned case and links; a preview writes nothing. Source refresh preserves the case and links, but does not freeze source record contents as historical evidence snapshots.
+The Action checks that every selected transfer still comes from the supplied origins, falls in the time window and reaches the selected recipient, then creates an ontology-owned case and links. Source refresh preserves the case and links, but does not freeze source record contents as historical evidence snapshots.
 
 ## Scope and code
 

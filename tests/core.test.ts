@@ -313,59 +313,6 @@ const asTest = { actor: 'test' }
 
 const noopAdapter = (): WritebackAdapter => ({ apply: () => {} })
 
-test('preview shares execution checks but never writes back, commits, or audits', () => {
-  let writes = 0
-  const rt = setup({ apply: () => { writes += 1 } })
-  const params = { orderId: 'O2', reason: 'duplicate' }
-  const plan = rt.preview('cancelOrder', params, asTest)
-  assert.equal(plan.ok, true)
-  assert.equal(rt.get('Order', 'O2', asTest)!.properties.status, 'pending')
-  assert.deepEqual(rt.auditLog(), [])
-  assert.equal(writes, 0)
-  assert.deepEqual(rt.execute('cancelOrder', params, asTest), plan)
-  assert.equal(writes, 1)
-  assert.equal(rt.auditLog().length, 1)
-
-  const task = { orderId: 'O2', taskId: 'T-preview', title: 'Investigate' }
-  assert.equal(rt.preview('openTask', task, asTest).ok, true)
-  assert.equal(rt.get('Task', 'T-preview', asTest), undefined)
-  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'orderTasks', asTest).objects, [])
-  assert.equal(rt.auditLog().length, 1)
-  assert.equal(rt.execute('openTask', task, asTest).ok, true)
-})
-
-test('preview returns the same local refusals, including edits and authority, without auditing', () => {
-  const rt = setup()
-  const calls = [
-    () => rt.preview('cancelOrder', { orderId: 'O1', reason: 'x' }, asTest),
-    () => rt.preview('cancelOrder', { orderId: 'missing', reason: 'x' }, asTest),
-    () => rt.preview('cancelOrder', { orderId: 'O2', reason: '' }, asTest),
-    () => rt.preview('sloppyReassign', { orderId: 'O2', toCustomerId: 'C2' }, asTest),
-    () => rt.preview('sneakyCancel', { orderId: 'O2' }, asTest),
-  ]
-  assert.deepEqual(calls.map((call) => { const result = call(); return result.ok ? 'ok' : result.error.code }),
-    ['SHIPPED_ORDER_CANNOT_BE_CANCELLED', 'TARGET_NOT_FOUND', 'INVALID_PARAMS', 'INVALID_EDITS', 'UNDECLARED_SOURCE_WRITE'])
-  assert.deepEqual(rt.auditLog(), [])
-  assert.deepEqual(rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', asTest).objects.map((o) => o.pk), ['C1'])
-
-  const db = new Database(':memory:')
-  const noAdapter = createRuntime(ontology, db)
-  noAdapter.load(SNAPSHOT)
-  assert.deepEqual(noAdapter.preview('cancelOrder', { orderId: 'O2', reason: 'x' }, asTest), {
-    ok: false, error: { code: 'NO_WRITEBACK_ADAPTER', message: 'action requires write-back but no adapter is configured' },
-  })
-  assert.throws(() => db.transaction(() => noAdapter.preview('setAssignee', { orderId: 'O2', assignee: 'alice' }, asTest))(), /open transaction/)
-  assert.deepEqual(noAdapter.auditLog(), [])
-  db.close()
-})
-
-test('preview propagates model errors without an execution audit entry', () => {
-  const rt = setup()
-  assert.throws(() => rt.preview('landmine', { orderId: 'O2' }, asTest), /precondition crashed/)
-  assert.throws(() => rt.preview('explodingEffects', { orderId: 'O2' }, asTest), /effects crashed/)
-  assert.deepEqual(rt.auditLog(), [])
-})
-
 // ─── The declared answers, enumerable at runtime ───
 
 test('the implementation declares its four answers as one enumerable value', () => {
@@ -424,7 +371,6 @@ test('unknown Actions are refused and audited; call never executes an Action', (
   const rt = setup()
   assert.throws(() => rt.call('cancelOrder', { orderId: 'O2', reason: 'x' }, asTest), /unknown function/)
   const expected = { ok: false, error: { code: 'UNKNOWN_ACTION', message: 'no action named "dropAllTables"' } }
-  assert.deepEqual(rt.preview('dropAllTables', {}, asTest), expected)
   assert.deepEqual(rt.auditLog(), [])
   assert.deepEqual(rt.execute('dropAllTables', {}, asTest), expected)
   assert.deepEqual(rt.auditLog().map((entry) => entry.error?.code), ['UNKNOWN_ACTION'])
@@ -1169,9 +1115,6 @@ test('a hidden origin leaks nothing through traversal', () => {
 test('a hidden object is indistinguishable from a nonexistent one — even as an action target', () => {
   const rt = visSetup()
   assert.equal(rt.get('Doc', 'D2', { actor: 'user:alice' }), undefined)
-  const preview = rt.preview('renameDoc', { docId: 'D2', title: 'x' }, { actor: 'user:alice' })
-  assert.equal(preview.ok, false)
-  if (!preview.ok) assert.equal(preview.error.code, 'TARGET_NOT_FOUND')
   assert.deepEqual(rt.auditLog(), [])
   const result = rt.execute('renameDoc', { docId: 'D2', title: 'x' }, { actor: 'user:alice' })
   assert.equal(result.ok, false)

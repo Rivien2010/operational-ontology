@@ -21,7 +21,6 @@ try {
   console.table(nurses.assessments.map(({ object, reasons }) => ({ nurse: object.pk, reasons: reasons.map((r) => r.message).join('; ') || 'eligible' })))
   const nurse = nurses.set.objects[0]
   const plan = { patientId: patient.pk, bedId: bed.pk, nurseId: nurse.pk, allocationId: 'PLAN-1', note: 'Provisional day-shift admission plan' }
-  console.log('Preview:', rt.preview('allocate', plan, { actor }))
   console.log('Plans before execution:', rt.search('Allocation', { actor }).objects.length)
   console.log('Commit:', rt.execute('allocate', plan, { actor }))
   console.log('P1 candidates after allocation:', rt.call('bedSearch', { patientId: 'P1' }, { actor }).set.objects.length)

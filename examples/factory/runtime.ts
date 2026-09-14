@@ -7,8 +7,7 @@ import { createFactoryOntology, type Factory } from './ontology.js'
 export function createFactory() {
   const sources = createFixtures()
   const store = new Database(':memory:')
-  // Rules run only on preview/run, after rt has been assigned. Keeping
-  // this wiring here lets the runtime's ActionCtx stay unchanged.
+  // Rules and Functions read through this getter after rt has been assigned.
   let rt: Runtime<Factory>
   const ontology = createFactoryOntology(() => rt)
   rt = createRuntime(ontology, store)

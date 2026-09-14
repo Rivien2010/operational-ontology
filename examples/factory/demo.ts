@@ -34,7 +34,6 @@ try {
     lineIds: evidence.lines.objects.map((line) => line.pk),
     reason: 'Review reinspection and customer contact for potentially affected shipments; product defects are not confirmed',
   }
-  console.log('Preview:', rt.preview('createContactTask', request, { actor }))
   console.log('Tasks before execution:', rt.search('ContactTask', { actor }).objects.length)
   console.log('Create task:', rt.execute('createContactTask', request, { actor }))
   rt.load(integrate(app.sources))

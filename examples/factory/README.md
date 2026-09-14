@@ -16,6 +16,8 @@ Gray: source-backed state. Orange: ontology-owned state. The diagram shows all o
   <img src="https://i.ytimg.com/vi/kQFvOResIvI/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Factory" width="640">
 </a>
 
+The API differs from the version used to make the video. See [`demo.ts`](./demo.ts) for current calls.
+
 `demo.ts` uses the runtime's filter and pivot operations directly:
 
 | Step | Result |
@@ -31,7 +33,7 @@ C1 is found because it received the selected lots. C2 is excluded because its L2
 
 The model's `customerImpact` Function retains only shipped lines from the selected lots and summarizes affected units per customer. When pivoting back from shipments to lines, it intersects with the original affected lines to exclude the unrelated L4 packed in S1. The remaining evidence is SL1, SL3 and SL4: C1 has 50 affected shipped units across two shipments. This is different from the 60 manufactured units in L1 and L3, which the demo also aggregates by product family. Quantity belongs to each shipment-line record, not to the deduplicated customer set.
 
-The operator previews and runs `createContactTask`. The Action checks the equipment finding, manufacturing window, customer and shipped-line evidence, then atomically creates an ontology-owned task with links to the customer, equipment, lots and lines. It sends no message and does not attempt to hold goods already shipped. Re-indexing preserves the task and evidence links; those links identify source records rather than freezing their historical contents.
+The operator reviews the evidence and executes `createContactTask`. The Action checks the equipment finding, manufacturing window, customer and shipped-line evidence, then atomically creates an ontology-owned task with links to the customer, equipment, lots and lines. It sends no message and does not attempt to hold goods already shipped. Re-indexing preserves the task and evidence links; those links identify source records rather than freezing their historical contents.
 
 ## Code and MCP
 

@@ -27,7 +27,6 @@ test('hospital pivots back only to confirmed waiting patients; candidate functio
   assert.deepEqual(nurses.assessments.map((a) => a.reasons.map((r) => r.code)), [[], ['NO_CAPACITY'], ['WRONG_SHIFT']])
   assert.deepEqual(rt.call('bedSearch', { patientId: 'P2' }, { actor }).set.objects, [])
   assert.throws(() => rt.call('bedSearch', { patientId: 'missing' }, { actor }), /missing or hidden/)
-  assert.equal(rt.preview('allocate', plan, { actor }).ok, true)
   assert.deepEqual(rt.auditLog(), [])
   assert.deepEqual(rt.search('Allocation', { actor }).objects, [])
 })
@@ -37,8 +36,9 @@ test('hospital records one atomic plan; source readiness is unchanged and the pl
   const before = structuredClone(sources)
   assert.deepEqual(ids(rt.call('bedSearch', { patientId: 'P4' }, { actor }).set.objects), ['B101'])
   const otherPlan = { ...plan, patientId: 'P4', allocationId: 'PLAN2' }
-  assert.equal(rt.preview('allocate', plan, { actor }).ok, true)
-  assert.equal(rt.preview('allocate', otherPlan, { actor }).ok, true)
+  for (const patientId of ['P1', 'P4']) {
+    assert.deepEqual(ids(rt.call('nurseSearch', { patientId, bedId: 'B101' }, { actor }).set.objects), ['N1'])
+  }
   assert.deepEqual(rt.auditLog(), [])
   assert.equal(rt.execute('allocate', plan, { actor }).ok, true)
   const saved = rt.get('Allocation', 'PLAN1', { actor })!
@@ -70,7 +70,7 @@ test('hospital final Action checks the combination and current source snapshot, 
     assert.equal(rt.execute('allocate', { ...plan, ...change }, { actor }).ok, false)
   }
   assert.deepEqual(rt.search('Allocation', { actor }).objects, [])
-  assert.equal(rt.preview('allocate', plan, { actor }).ok, true)
+  assert.deepEqual(ids(rt.call('nurseSearch', { patientId: 'P1', bedId: 'B101' }, { actor }).set.objects), ['N1'])
   sources.nurses[0].slots = 0
   rt.load(integrate(sources))
   const rejected = rt.execute('allocate', plan, { actor })

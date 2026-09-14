@@ -79,7 +79,7 @@ export function compileOnly(rt: Runtime<typeof model>, name: string): void {
   // @ts-expect-error predicate callbacks retain the properties of an explicit object type
   rt.search('Order', { ...actor, filter: (object) => object.properties.status === 'lost' })
   rt.execute('cancelOrder', { orderId: 'O1' }, actor)
-  rt.preview(name, {}, actor)
+  rt.execute(name, {}, actor)
   modify(order, { status: 'lost', missing: 1 })
 
   defineAction(objects, {
@@ -118,7 +118,7 @@ export function compileOnlyFunctions(rt: Runtime<typeof functionModel>, name: st
   // Argument validation belongs to the model's Zod schemas at runtime.
   rt.call('labels', { prefix: 'order', count: 'two' }, actor)
   rt.call('unknownFunction', {}, actor)
-  rt.preview('labels', {}, actor)
+  rt.execute('labels', {}, actor)
 }
 
 function setup() {

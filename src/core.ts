@@ -231,7 +231,7 @@ export interface ActionDef<S extends Properties = Properties, O extends ObjectIn
   params: S
   description?: string
   /**
-   * Business rules. Like effects, these must be pure: preview() runs them too.
+   * Business rules must be pure, like effects.
    * Each precondition may return `reject(code, message)` to
    * refuse the write. These are domain rules ("a shipped order cannot be
    * cancelled"), not access control — a permission system decides *who* may
@@ -622,16 +622,6 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
 
   // ── Write side: every change goes through an action ──
 
-  /** Apply an Action through the write gate; refusals are audited too. */
-  execute(actionName: string, params: Record<string, unknown>, opts: { actor: string }): ActionResult {
-    return this.#runAction(actionName, params, opts, 'execute')
-  }
-
-  /** Validate an action's plan without write-back, commit, or audit. */
-  preview(actionName: string, params: Record<string, unknown>, opts: { actor: string }): ActionResult {
-    return this.#runAction(actionName, params, opts, 'preview')
-  }
-
   /**
    * Execute an action. This is the only way the API changes state:
    * validate params → load target → preconditions → effects → dry-run the
@@ -640,20 +630,16 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
    * audit entry. Validity precedes authority: a plan the store would refuse
    * is INVALID_EDITS, whatever else it is.
    */
-  #runAction(
-    actionName: string, params: unknown, opts: { actor: string }, mode: 'execute' | 'preview',
-  ): ActionResult {
-    this.#refuseOpenTransaction(mode)
-    // From here on the params are raw input: the schema, not the type, decides.
-    const raw = params as Record<string, unknown>
-    // Every execution attempt is audited, including early refusals. Previews are reads.
+  execute(actionName: string, params: Record<string, unknown>, opts: { actor: string }): ActionResult {
+    this.#refuseOpenTransaction('execute')
+    // Every execution attempt is audited, including early refusals.
     const refuseAs = (
       target: string,
       auditParams: Record<string, unknown>,
       error: Violation,
       edits?: Edit[],
     ): ActionResult => {
-      if (mode === 'execute') this.#audit({
+      this.#audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -669,27 +655,27 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       ? this.ontology.actions[actionName]
       : undefined
     if (!action) {
-      return refuseAs('(unknown action)', raw, reject('UNKNOWN_ACTION', `no action named "${actionName}"`))
+      return refuseAs('(unknown action)', params, reject('UNKNOWN_ACTION', `no action named "${actionName}"`))
     }
 
     const guessTarget = () => {
-      const guessed = raw[action.targetParam]
+      const guessed = params[action.targetParam]
       return `${action.object}/${guessed != null ? String(guessed) : '(invalid)'}`
     }
 
     // Params are stored verbatim in the audit log, so they must be values
     // the log can hold faithfully — refused here, and still audited (the
     // audit write falls back to a placeholder for what it cannot encode).
-    if (!isPlainJson(raw)) {
-      return refuseAs(guessTarget(), raw, reject('INVALID_PARAMS', 'params are not plain JSON data'))
+    if (!isPlainJson(params)) {
+      return refuseAs(guessTarget(), params, reject('INVALID_PARAMS', 'params are not plain JSON data'))
     }
 
-    const parsed = z.object(action.params).safeParse(raw)
+    const parsed = z.object(action.params).safeParse(params)
     if (!parsed.success) {
       const issue = parsed.error.issues[0]
       return refuseAs(
         guessTarget(),
-        raw,
+        params,
         reject('INVALID_PARAMS', `${issue?.path.join('.') ?? 'params'}: ${issue?.message ?? 'invalid'}`),
       )
     }
@@ -698,9 +684,9 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     const target = `${action.object}/${pk}`
     const refuse = (error: Violation, edits?: Edit[]): ActionResult => refuseAs(target, parsed.data, error, edits)
 
-    // Execution crashes are audited as EXECUTION_CRASHED. Both modes rethrow.
+    // Execution crashes are audited as EXECUTION_CRASHED, then rethrown.
     const crashed = (e: unknown): never => {
-      if (mode === 'execute') this.#audit({
+      this.#audit({
         actor: opts.actor,
         action: actionName,
         target,
@@ -785,21 +771,17 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       )
     }
 
-    if (action.writeback && edits.length > 0 && !this.#writeback) {
-      return refuse(reject('NO_WRITEBACK_ADAPTER', 'action requires write-back but no adapter is configured'))
-    }
-    // Preview is a snapshot of local validity, not a reservation or a source
-    // acknowledgement. execute() runs these checks again against current state.
-    if (mode === 'preview') return { ok: true, edits }
-
     // An empty plan changes nothing, so there is nothing to write back —
     // the attempt still commits an audit entry below.
     if (action.writeback && edits.length > 0) {
+      if (!this.#writeback) {
+        return refuse(reject('NO_WRITEBACK_ADAPTER', 'action requires write-back but no adapter is configured'))
+      }
       try {
         // Write-back first: if the system of record refuses, nothing changes
         // here. The adapter gets its own copies: what commits below is the
         // plan that was validated, not whatever the adapter left behind.
-        this.#writeback!.apply(structuredClone(edits), {
+        this.#writeback.apply(structuredClone(edits), {
           action: actionName,
           actor: opts.actor,
           target: structuredClone(object),

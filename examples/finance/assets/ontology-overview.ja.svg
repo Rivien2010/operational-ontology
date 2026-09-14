@@ -90,6 +90,6 @@
   <text x="636" y="1056" text-anchor="start" font-size="18" font-weight="500" fill="#5B626B">対象口座・起点口座・根拠取引と結びつける。</text>
   <text x="636" y="1122" text-anchor="start" font-size="17" font-weight="650" fill="#C96A00">調査ケースを記録。口座は凍結しない。</text>
   </g>
-  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">取引を辿る → 受取先を比較 → 根拠を確認 → preview → Action を実行</text>
+  <text x="600" y="1183" text-anchor="middle" font-size="18" font-weight="550" fill="#5B626B">取引を辿る → 受取先を比較 → 根拠を確認 → Action を実行</text>
   <text x="1146" y="1214" text-anchor="end" font-size="16" font-weight="500" fill="#747B84">Operational Ontology · 金融の例</text>
 </svg>

@@ -345,9 +345,11 @@ test('rejected attempts are recorded in the audit log', () => {
 
 test('an allowed action applies its edits and audits them atomically', () => {
   const rt = setup()
+  const before = rt.get('Order', 'O2', asTest)!
   const result = rt.execute('cancelOrder', { orderId: 'O2', reason: 'duplicate' }, { actor: 'test' })
   assert.equal(result.ok, true)
   assert.equal(rt.get('Order', 'O2', asTest)!.properties.status, 'cancelled')
+  assert.equal(before.properties.status, 'pending', 'an earlier read remains a snapshot')
   const applied = rt.auditLog({ status: 'applied' })
   assert.equal(applied.length, 1)
   assert.deepEqual(applied[0].edits, [{ op: 'modify', object: 'Order', pk: 'O2', changes: { status: 'cancelled' } }])
@@ -888,16 +890,69 @@ test('actions can rewire the graph itself — links are edits too', () => {
   assert.deepEqual(rt.traverse(rt.get('Customer', 'C2', asTest)!, 'customerOrders', asTest).objects.map((o) => o.pk), ['O2'])
 })
 
-test('links traverse in both directions', () => {
+test('links infer direction from tagged instances and reject invalid sources or directions', () => {
   const rt = setup()
-  assert.deepEqual(
-    rt.traverse(rt.get('Customer', 'C1', asTest)!, 'customerOrders', asTest).objects.map((o) => o.pk),
-    ['O1', 'O2'],
-  )
-  assert.deepEqual(
-    rt.traverse(rt.get('Order', 'O2', asTest)!, 'customerOrders', { ...asTest, direction: 'reverse' }).objects.map((c) => c.pk),
-    ['C1'],
-  )
+  const customer = rt.get('Customer', 'C1', asTest)!
+  assert.deepEqual(customer, { type: 'Customer', pk: 'C1', properties: { id: 'C1', name: 'Yamada' } })
+  const orders = rt.traverse(customer, 'customerOrders', asTest)
+  assert.deepEqual(orders.objects.map((o) => o.pk), ['O1', 'O2'])
+  assert.deepEqual(rt.traverse(orders.objects[0], 'customerOrders', asTest).objects, [customer])
+  assert.throws(() => rt.traverse(customer, 'customerOrders', { ...asTest, direction: 'reverse' }), /invalid direction/)
+  assert.throws(() => rt.traverse(customer, 'orderTasks', asTest), /does not connect/)
+  // @ts-expect-error an instance must include its properties
+  assert.throws(() => rt.traverse({ type: 'Customer', pk: 'C1' }, 'customerOrders', asTest), /requires an object instance/)
+  // @ts-expect-error runtime callers can still supply an invalid direction
+  assert.throws(() => rt.traverse(customer, 'customerOrders', { ...asTest, direction: null }), /invalid direction/)
+  assert.deepEqual(rt.traverse({ ...customer, pk: 'missing' }, 'customerOrders', asTest).objects, [])
+})
+
+test('same-type links require direction even at an endpoint with only incoming or outgoing edges', (t) => {
+  const db = new Database(':memory:')
+  t.after(() => db.close())
+  const rt = createRuntime(defineOntology({
+    name: 'employees',
+    objects: { Employee: defineObject({ primaryKey: 'id', properties: { id: z.string() } }) },
+    links: { manages: defineLink({ from: 'Employee', to: 'Employee', kind: 'one-to-many' }) },
+    actions: {},
+  }), db)
+  rt.load({ objects: { Employee: [{ id: 'E1' }, { id: 'E2' }, { id: 'E3' }] },
+    links: { manages: [['E1', 'E2'], ['E2', 'E3']] } })
+  const middle = rt.get('Employee', 'E2', asTest)!
+  assert.deepEqual(rt.traverse(middle, 'manages', { ...asTest, direction: 'reverse' }).objects.map((o) => o.pk), ['E1'])
+  assert.deepEqual(rt.traverse(middle, 'manages', { ...asTest, direction: 'forward' }).objects.map((o) => o.pk), ['E3'])
+  for (const employee of rt.search('Employee', asTest).objects) {
+    assert.throws(() => rt.traverse(employee, 'manages', asTest), /requires a direction/)
+  }
+})
+
+test('identity does not collide with business properties or primary keys in another type', (t) => {
+  const model = defineOntology({
+    name: 'identity',
+    objects: {
+      Left: defineObject({
+        primaryKey: 'code',
+        properties: { code: z.string(), type: z.string(), pk: z.string(), properties: z.string() },
+      }),
+      Right: defineObject({ primaryKey: 'key', properties: { key: z.string() } }),
+    },
+    links: { pair: defineLink({ from: 'Left', to: 'Right', kind: 'one-to-many' }) },
+    actions: {},
+  })
+  const db = new Database(':memory:')
+  t.after(() => db.close())
+  const rt = createRuntime(model, db)
+  const actor = { actor: 'test' }
+  const properties = { code: 'same', type: 'business type', pk: 'business pk', properties: 'business value' }
+  rt.load({ objects: { Left: [properties], Right: [{ key: 'same' }] }, links: { pair: [['same', 'same']] } })
+  const left = rt.get('Left', 'same', actor)!
+  const right = rt.get('Right', 'same', actor)!
+  assert.deepEqual(left, { type: 'Left', pk: 'same', properties })
+  assert.deepEqual(rt.traverse(left, 'pair', actor).objects, [right])
+  assert.deepEqual(rt.traverse(right, 'pair', actor).objects, [left])
+  assert.deepEqual(rt.search('Left', { ...actor, filter: (object) => object.properties.type === 'business type' }).objects, [left])
+  assert.deepEqual(modify(left, { type: 'new business type' }), {
+    op: 'modify', object: 'Left', pk: 'same', changes: { type: 'new business type' },
+  })
 })
 
 test('create refuses a pk that disagrees with the data — before write-back', () => {
@@ -1106,10 +1161,16 @@ test('a crashing visibility predicate is audited as EXECUTION_CRASHED', () => {
   assert.equal(rt.auditLog({ status: 'rejected' })[0]?.error?.code, 'EXECUTION_CRASHED')
 })
 
-test('a hidden origin leaks nothing through traversal', () => {
+test('traversal rechecks stored visibility at both ends, ignoring caller-supplied properties', () => {
   const rt = visSetup()
-  assert.deepEqual(rt.traverse(rt.get('Doc', 'D2', { actor: 'user:auditor' })!, 'docComments', { actor: 'user:alice' }).objects, [])
-  assert.equal(rt.traverse(rt.get('Doc', 'D2', { actor: 'user:auditor' })!, 'docComments', { actor: 'user:bob' }).objects.length, 1)
+  const doc = rt.get('Doc', 'D2', { actor: 'user:auditor' })!
+  doc.properties.owner = 'user:alice' // the stored owner is still bob
+  assert.deepEqual(rt.traverse(doc, 'docComments', { actor: 'user:alice' }).objects, [])
+  const comments = rt.traverse(doc, 'docComments', { actor: 'user:bob' }).objects
+  assert.deepEqual(comments.map((o) => o.pk), ['CM1'])
+  assert.deepEqual(rt.traverse(comments[0], 'docComments', { actor: 'user:alice' }).objects, [], 'hidden destination')
+  assert.deepEqual(rt.traverse(comments[0], 'docComments', { actor: 'user:bob' }).objects,
+    [rt.get('Doc', 'D2', { actor: 'user:bob' })])
 })
 
 test('a hidden object is indistinguishable from a nonexistent one — even as an action target', () => {

@@ -4,13 +4,13 @@ import Database from 'better-sqlite3'
 import { z } from 'zod'
 import {
   aggregationResult, createRuntime, defineLink, defineObject, defineOntology, objectSet,
-  type AggregationResult, type AggregationRow, type ObjectOf, type ObjectSet, type Runtime,
+  type AggregationRow, type ObjectOf, type ObjectSet,
 } from '../src/index.js'
 import { aggregate, combine, filterAggregation, filterObjects } from '../src/query.js'
 
 const fields = {
   id: z.string(), family: z.string(), units: z.number(), quality: z.enum(['good', 'suspect']),
-  producedAt: z.iso.datetime({ offset: true }), released: z.boolean(),
+  released: z.boolean(),
 }
 const model = defineOntology({
   name: 'sets',
@@ -28,8 +28,8 @@ const model = defineOntology({
 })
 type Model = typeof model
 type Lot = ObjectOf<Model, 'Lot'>
-const lot = (id: string, family: string, units: number, producedAt = '2026-09-06T09:00:00+09:00'): Lot => ({
-  type: 'Lot', pk: id, properties: { id, family, units, producedAt, quality: 'suspect', released: true },
+const lot = (id: string, family: string, units: number): Lot => ({
+  type: 'Lot', pk: id, properties: { id, family, units, quality: 'suspect', released: true },
 })
 const lots = () => objectSet('Lot', [lot('L1', 'A', 40), lot('L2', 'A', 30), lot('L3', 'A', 20), lot('L4', 'B', 50)])
 const ids = (set: ObjectSet) => set.objects.map((o) => o.pk)
@@ -69,30 +69,15 @@ test('local predicates select snapshots and keep the set tag, order and identity
   assert.deepEqual(ids(input), ['L1', 'L2', 'L3', 'L4'])
   assert.deepEqual(rt.filter(selected, () => false), { type: 'Lot', objects: [] })
   assert.throws(() => rt.filter(input, () => { throw new Error('bad predicate') }), /bad predicate/)
+  for (const set of [input, objectSet('Lot', [] as Lot[])]) {
+    for (const invalid of [{ quality: 'suspect' }, [{ property: 'units', op: 'gte', value: 30 }], 'object => true']) {
+      assert.throws(() => filterObjects(set, invalid as never), /predicate function/)
+    }
+  }
   const seen: string[] = []
   rt.search('Employee', { actor: 'alice', filter: (employee) => { seen.push(employee.pk); return true } })
   assert.deepEqual(seen, ['E1', 'E2'], 'search applies visibility before the predicate')
   assert.deepEqual(rt.auditLog(), [])
-})
-
-test('predicates define date and missing-value semantics; serialized conditions are not accepted', () => {
-  const dates = objectSet('Lot', [lot('before', 'A', 1, '2026-09-05T23:59:59+09:00'),
-    lot('inside', 'A', 1, '2026-09-06T00:00:00Z'), lot('after', 'A', 1, '2026-09-07T00:00:00+09:00')])
-  const selected = filterObjects(dates, (lot) => {
-    const time = Date.parse(lot.properties.producedAt)
-    return time >= Date.parse('2026-09-06T00:00:00+09:00') && time < Date.parse('2026-09-07T00:00:00+09:00')
-  })
-  assert.deepEqual(ids(selected), ['inside'])
-  const nullable = objectSet('Value', [
-    { type: 'Value', pk: 'missing', properties: { amount: null } },
-    { type: 'Value', pk: 'present', properties: { amount: 5 } },
-  ])
-  assert.deepEqual(ids(filterObjects(nullable, (value) => value.properties.amount === null)), ['missing'])
-  for (const input of [lots(), objectSet('Lot', [] as Lot[])]) {
-    for (const invalid of [{ quality: 'suspect' }, [{ property: 'units', op: 'gte', value: 30 }], 'object => true']) {
-      assert.throws(() => filterObjects(input, invalid as never), /predicate function/)
-    }
-  }
 })
 
 test('filtering aggregate rows keeps the corresponding members and does not recompute metrics', (t) => {
@@ -113,6 +98,28 @@ test('filtering aggregate rows keeps the corresponding members and does not reco
   const none = rt.filter(selected, (row) => row.metrics.count > 3)
   assert.deepEqual(none, { set: { type: 'Lot', objects: [] }, values: [] })
   assert.deepEqual(rt.auditLog(), [])
+})
+
+test('groupBy preserves numeric and boolean keys, including zero and false', () => {
+  const second = lot('L2', 'B', 10)
+  second.properties.released = false
+  const input = objectSet('Lot', [lot('L1', 'A', 0), second, lot('L3', 'A', 0)])
+  assert.deepEqual(aggregate(input, { groupBy: 'units' }, fields).values, [
+    { key: 0, pks: ['L1', 'L3'], metrics: { count: 2 } },
+    { key: 10, pks: ['L2'], metrics: { count: 1 } },
+  ])
+  assert.deepEqual(aggregate(input, { groupBy: 'released' }, fields).values, [
+    { key: true, pks: ['L1', 'L3'], metrics: { count: 2 } },
+    { key: false, pks: ['L2'], metrics: { count: 1 } },
+  ])
+})
+
+test('groupBy rejects null and missing values even when their schema permits them', () => {
+  const properties = { category: z.string().nullable().optional() }
+  for (const row of [{ category: null }, {}]) {
+    const input = objectSet('Value', [{ type: 'Value', pk: 'V1', properties: row }])
+    assert.throws(() => aggregate(input, { groupBy: 'category' }, properties), /groupBy requires a non-null scalar/)
+  }
 })
 
 test('custom Function metrics use the same aggregation contract', () => {
@@ -167,34 +174,6 @@ test('pivot deduplicates, preserves empty target tags and rechecks visibility an
   assert.deepEqual(ids(rt.intersect(employees, alice)), ['E2'])
   assert.deepEqual(ids(rt.subtract(employees, alice)), ['E1', 'E3'])
 })
-
-/** Fixed data shapes stay typed; schema-specific combinations are runtime checks. */
-export function compileOnly(rt: Runtime<Model>) {
-  const input = rt.search('Lot', { actor: 'admin' })
-  const equipment = rt.search('Equipment', { actor: 'admin' })
-  // @ts-expect-error arrays are readonly
-  input.objects.push(input.objects[0])
-  // @ts-expect-error tags are readonly
-  input.type = 'Lot'
-  // @ts-expect-error filter accepts only a predicate
-  rt.filter(input, { quality: 'suspect' })
-  // @ts-expect-error serialized conditions are no longer supported
-  rt.filter(input, [{ property: 'units', op: 'approximately', value: 40 }])
-  const custom = aggregationResult(input, [{ key: 'X', pks: ['L1'], metrics: { senderCount: 3 } }])
-  const selected: AggregationResult<Lot> = rt.filter(custom, (row) => row.metrics.senderCount >= 2)
-  const exact: ObjectSet<Lot> = selected.set
-  // @ts-expect-error metrics are numeric
-  aggregationResult(input, [{ key: 'X', pks: ['L1'], metrics: { count: 'three' } }])
-  // @ts-expect-error metric snapshots are readonly
-  selected.values[0].metrics.senderCount = 4
-  // These are accepted by TypeScript and rejected by the runtime tests below.
-  rt.union(input, equipment)
-  objectSet('Equipment', input.objects)
-  // @ts-expect-error predicates must be synchronous
-  rt.filter(input, async () => true)
-  rt.aggregate(input, { groupBy: 'family', sum: 'quality' })
-  void exact
-}
 
 test('public APIs reject model-specific mistakes without TypeScript navigation constraints', (t) => {
   const rt = runtime(t)

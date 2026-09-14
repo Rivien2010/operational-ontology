@@ -11,7 +11,7 @@ import { createFixtures } from './fixtures.js'
 import { integrate } from './integrate.js'
 import { orders } from './ontology.js'
 import { createErpAdapter } from './erp-adapter.js'
-import { heading as h, log, pause } from '../demo-output.js'
+import { heading as h, log, pause, trace } from '../demo-output.js'
 
 // ── 1. The physical layer exists first ──────────────────────────────────
 h('1. Physical data (before any ontology)')
@@ -35,26 +35,35 @@ log('declared semantics:', rt.declarations)
 h('3. Read: traverse links, aggregate at query time')
 const hq = { actor: 'user:hq' }
 const yamada = rt.get('Customer', 'N-C01', hq)!
+const yamadaOrders = rt.traverse(yamada, 'customerOrders', hq)
+trace('Traverse customerOrders (forward): Customer → Order', { customer: yamada }, yamadaOrders)
 log(`orders of ${yamada.properties.name}:`)
-for (const o of rt.traverse(yamada, 'customerOrders', hq).objects) {
+for (const o of yamadaOrders.objects) {
   log(`  ${o.pk}  ${(o.properties.status as string).padEnd(9)} ¥${o.properties.total}`)
 }
-log('who ordered Keyboard (reverse traversal):',
-  rt.traverse(rt.get('Product', 'ITM-101', hq)!, 'orderProducts', hq).objects.map((o) => o.pk))
+const keyboard = rt.get('Product', 'ITM-101', hq)!
+const keyboardOrders = rt.traverse(keyboard, 'orderProducts', hq)
+trace('Traverse orderProducts (reverse): Keyboard → orders containing it', { product: keyboard }, keyboardOrders)
 const byRegion = new Map<string, { count: number; sum: number }>()
-for (const customer of rt.search('Customer', hq).objects) {
-  const pending = rt.filter(rt.traverse(customer, 'customerOrders', hq), (object) => object.properties.status === 'pending')
+const customers = rt.search('Customer', hq)
+trace('Search Customer: collect pending order value by customer region', {}, customers)
+for (const customer of customers.objects) {
+  const orders = rt.traverse(customer, 'customerOrders', hq)
+  trace('Traverse customerOrders (forward): collect this customer\'s orders', { customer }, orders)
+  const pending = rt.filter(orders, (object) => object.properties.status === 'pending')
+  trace('Filter status = pending: select the orders to count and sum', { orders }, pending)
   if (!pending.objects.length) continue
   const region = customer.properties.region
   const row = byRegion.get(region) ?? { count: 0, sum: 0 }
   row.count += pending.objects.length
   row.sum += pending.objects.reduce((sum, order) => sum + (order.properties.total as number), 0)
   byRegion.set(region, row)
+  log(`    Accumulate region ${region}:`, row)
 }
 log('pending order value by region:', Object.fromEntries(byRegion))
 log('same search, different actors (visibility lives in the model):')
-log('  as user:north-sales:', rt.search('Order', { actor: 'user:north-sales' }).objects.map((o) => o.pk))
-log('  as user:hq:         ', rt.search('Order', hq).objects.map((o) => o.pk))
+trace('Search Order as user:north-sales', {}, rt.search('Order', { actor: 'user:north-sales' }))
+trace('Search Order as user:hq', {}, rt.search('Order', hq))
 
 // ── 4. Write side: every change is an action ────────────────────────────
 h('4. Write: an allowed action')
@@ -85,7 +94,9 @@ rt.execute('addOrderNote', { orderId: 'N-A-1002', noteId: 'NOTE-1', text: 'audit
 rt.load(integrate(legacy)) // the pipeline runs again over the live legacy systems
 const reindexed = rt.get('Order', 'N-A-1002', hq)!
 log(`assignee of N-A-1002:  ${reindexed.properties.assignee}  ← ontology-owned, survived the re-index`)
-log('notes on N-A-1002:    ', rt.traverse(reindexed, 'orderNotes', hq).objects.map((n) => n.properties.text))
+const notes = rt.traverse(reindexed, 'orderNotes', hq)
+trace('Traverse orderNotes (forward): Order → Note', { order: reindexed }, notes)
+log('notes on N-A-1002:    ', notes.objects.map((n) => n.properties.text))
 log(`status of S-SO-77:     ${rt.get('Order', 'S-SO-77', hq)!.properties.status}  ← source-backed, refreshed from the ERP (where the cancellation held)`)
 log(`status of S-SO-79:     ${rt.get('Order', 'S-SO-79', hq)!.properties.status}  ← the truth the source defended in step 7, arriving with the re-index`)
 

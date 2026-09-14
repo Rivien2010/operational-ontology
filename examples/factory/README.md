@@ -18,7 +18,7 @@ Gray: source-backed state. Orange: ontology-owned state. The diagram shows all o
 
 The API differs from the version used to make the video. See [`demo.ts`](./demo.ts) for current calls.
 
-`demo.ts` uses the runtime's filter and pivot operations directly:
+`demo.ts` uses the runtime's filter, pivot and set operations directly. Each operation prints its input and result types, IDs and counts:
 
 | Step | Result |
 | --- | --- |
@@ -28,6 +28,8 @@ The API differs from the version used to make the video. See [`demo.ts`](./demo.
 | Pivot to shipment lines | SL1, SL3, SL5, SL4 |
 | Pivot to shipments and filter shipped status | S1, S2 |
 | Pivot to customers | C1 (Aoba), once |
+| Pivot from shipped shipments back to all their lines | SL1, SL6, SL3, SL4 |
+| Intersect with the affected lines | SL1, SL3, SL4 |
 
 C1 is found because it received the selected lots. C2 is excluded because its L2 was made September 5. The remaining 10 units of L1 destined for C3 are excluded because they have not shipped. L1 appears in shipped S1 and S2; set membership deduplicates identities at every step.
 

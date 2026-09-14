@@ -30,7 +30,9 @@ The demo follows outgoing transfers from each origin, filters September 8 aftern
 | B | X, W |
 | C | X, Z |
 
-Intersecting all three sets yields X. X was not specified as a target at the start: comparing A, B and C's recipients reveals it as the one shared by all three. A model Function, `recipientSummary`, provides the complementary aggregate route:
+The demo prints both inputs and the result of each set operation, with types, IDs and counts. Union collects all recipients: X, Y, W and Z. Intersecting A and B's recipients first gives X and W; intersecting that result with C's recipients leaves X. Subtracting this common set from all recipients leaves Y, W and Z. These operations compare account identities; they do not aggregate transfer amounts.
+
+X was not specified as a target at the start: comparing A, B and C's recipients reveals it as the one shared by all three. A model Function, `recipientSummary`, provides the complementary aggregate route:
 
 | Recipient | Distinct senders | Transfers | Total yen |
 | --- | --- | --- | --- |

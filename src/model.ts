@@ -66,7 +66,7 @@ export interface ObjectTypeDef<S extends Properties = Properties> {
   description?: string
 }
 
-/** Check the definition and owned defaults now; Store checks individual rows later. */
+/** Check the definition and owned defaults now; Runtime checks individual rows later. */
 export function defineObject<S extends Properties>(def: ObjectTypeDef<S>): ObjectTypeDef<S> {
   if (!Object.hasOwn(def.properties, def.primaryKey)) {
     throw new Error(`primaryKey "${def.primaryKey}" is not one of the defined properties`)

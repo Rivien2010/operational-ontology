@@ -1,6 +1,6 @@
 /**
  * Public entry point: define a model, create a Runtime, then expose it through
- * MCP if needed. Store and query evaluators remain implementation details;
+ * MCP if needed. Persistence and query evaluators remain implementation details;
  * callers work with instances, sets and operation results.
  */
 export {

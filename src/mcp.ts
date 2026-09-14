@@ -17,7 +17,7 @@
  *
  * This file adapts JSON inputs and outputs, derives schemas, and supplies the
  * session actor. Runtime still executes queries and checks Action plans;
- * transport handlers do not reproduce domain rules or write directly to Store.
+ * transport handlers do not reproduce domain rules or write directly to SQLite.
  * Clients filter results in their own code execution environment; no code is
  * accepted or executed by this server.
  */

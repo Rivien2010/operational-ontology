@@ -8,14 +8,13 @@ An action execution refusal returns `{ ok: false, error: { code, message } }` an
 
 ## Code organization
 
-The public entry point remains `Runtime`; the implementation follows the responsibilities below without introducing a query class or storage interface hierarchy.
+The public entry point is `Runtime`. Its private methods also own persistence, so the Action gate and the edit/audit commit can be followed within `core.ts`. Pure operations on evaluated values remain in `query.ts`.
 
 | File | Responsibility |
 | --- | --- |
 | `model.ts` | Definition helpers, instance shapes and edit plans. |
-| `core.ts` | Actor-scoped reads, the public query methods, `execute` / `call` / `preview`, and the Action gate. |
+| `core.ts` | Actor-scoped reads, Actions and Functions, SQLite persistence, indexing, integrity checks and transactions. |
 | `query.ts` | Pure operations on evaluated sets and aggregations, using caller-supplied predicates. |
-| `store.ts` | Concrete SQLite storage, indexing, integrity checks, edits and atomic local audit commits. |
 | `mcp.ts` | Generate tools from the model and adapt inputs to the same runtime operations. |
 
 ## Instances and traversal

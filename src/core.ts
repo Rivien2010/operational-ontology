@@ -1,7 +1,8 @@
 /**
  * operational-ontology · core
  *
- * The runtime that interprets the definitions in model.ts:
+ * The definition layer (the model as data) and the runtime that makes it
+ * operational:
  *
  *   - objects & links are indexed from existing physical data (read side)
  *   - every write goes through an action: preconditions → effects → audit log
@@ -16,21 +17,311 @@
  * runtime interprets it — which is what lets `mcp.ts` enumerate it and expose
  * the same model, guarded by the same rules, to AI agents.
  *
- * Vocabulary: model.ts defines the schema side of the model; the
+ * Vocabulary: the definitions below are the schema side of the model; the
  * store holds the instance side — object state, link instances, and the
  * audit log, where one entry is one attempted action.
+ *
+ * Runtime owns actor-scoped reads, the Action gate, and SQLite transactions.
+ * query.ts operates on evaluated values without reading or writing the store.
+ * The public methods expose data shapes; runtime checks enforce model constraints.
  */
 import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import type { Database } from 'better-sqlite3'
 
-import { isPlainJson, reject } from './model.js'
-import type {
-  ActionCtx, ActionDef, ActionName, Edit, ObjectFilter, ObjectInstance, ObjectName,
-  ObjectOf, ObjectTypeDef, OntologyDef, ParamsOf, Properties, LinkName, LinksFrom, LinkTarget,
-  TraverseOptions, Violation,
-} from './model.js'
-export * from './model.js'
+import * as query from './query.js'
+import type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter } from './query.js'
+export { objectSet, aggregationResult } from './query.js'
+export type { ObjectSet, AggregationResult, AggregationRow, ObjectFilter } from './query.js'
+
+// ───────────────────────────── Definitions ─────────────────────────────
+
+/** A map of property names to validators, rather than a row's actual values. */
+export type Properties = z.ZodRawShape
+
+/**
+ * A read snapshot. Identity is (type, pk); properties are business data.
+ * N preserves the object type's literal name; P is its parsed property shape.
+ * `readonly` protects identity in TypeScript, not by freezing the value.
+ * Changing this snapshot does not persist a change: writes require an Action.
+ */
+export interface ObjectInstance<N extends string = string, P = Record<string, unknown>> {
+  readonly type: N
+  readonly pk: string
+  properties: P
+}
+
+export interface ObjectTypeDef<S extends Properties = Properties> {
+  /** Property that uniquely identifies an object of this type. Must be a string property. */
+  primaryKey: keyof S & string
+  /**
+   * Property schema. Validates rows at indexing time and edits at write time,
+   * and is reused verbatim to generate MCP tool schemas. Schemas must
+   * validate, not transform: the runtime stores what a schema produced and
+   * feeds it back through the same schema on later writes, so a transforming
+   * schema would refuse or rewrite its own output — a declared contract (see
+   * "The storable boundary" in IMPLEMENTATION.md).
+   */
+  properties: S
+  /**
+   * Authority declaration — which of this type's state the ontology itself
+   * owns. Everything not declared here is source-backed: the indexed snapshot
+   * supplies it, and changing it requires write-back.
+   *
+   * - `owned: true` — the whole type is ontology-owned, existence included.
+   *   No source supplies its rows (`load()` refuses them); actions create and
+   *   modify them without write-back; they survive re-indexing untouched.
+   * - `owned: { prop: default }` — these properties are ontology-owned on
+   *   otherwise source-backed rows. A loaded row must NOT supply them (the
+   *   source has no authority over them); they start at the declared default,
+   *   change only through actions, and survive re-indexing via the overlay.
+   */
+  owned?: true | Partial<z.input<z.ZodObject<S>>>
+  /**
+   * Row-level visibility, attached to the model (an optional slot). Absent
+   * means visible to everyone: this reference implementation is fail-open by
+   * declaration — it has no authentication, so `actor` is self-declared and
+   * enforcement here demonstrates placement, not protection. A fail-closed
+   * deployment makes this slot required rather than optional, on top of an
+   * authenticated identity layer. See "Visibility and caller identity"
+   * in IMPLEMENTATION.md.
+   */
+  visibility?: (ctx: { object: ObjectInstance<string, z.output<z.ZodObject<S>>>; actor: string }) => boolean
+  /**
+   * Where the rows physically come from (documentation only — the integration
+   * itself belongs to the data layer, outside the ontology).
+   */
+  source?: string
+  description?: string
+}
+
+/** Check the definition and owned defaults now; Runtime checks individual rows later. */
+export function defineObject<S extends Properties>(def: ObjectTypeDef<S>): ObjectTypeDef<S> {
+  if (!Object.hasOwn(def.properties, def.primaryKey)) {
+    throw new Error(`primaryKey "${def.primaryKey}" is not one of the defined properties`)
+  }
+  if (def.owned === true && def.source) {
+    throw new Error('an ontology-owned type has no source — drop `source` or the `owned: true`')
+  }
+  if (def.owned && def.owned !== true) {
+    for (const [key, fallback] of Object.entries(def.owned)) {
+      if (!Object.hasOwn(def.properties, key)) {
+        throw new Error(`owned property "${key}" is not one of the defined properties`)
+      }
+      if (key === def.primaryKey) {
+        throw new Error(`the primary key "${key}" cannot be ontology-owned`)
+      }
+      const parsed = (def.properties[key] as z.ZodType).safeParse(fallback)
+      if (!parsed.success) {
+        throw new Error(`default for owned property "${key}" does not satisfy its schema`)
+      }
+      // Owned values live in the store and travel through re-indexing, so
+      // the default must be a value the store can hold faithfully.
+      if (!isPlainJson(parsed.data)) {
+        throw new Error(`default for owned property "${key}" must be plain JSON data`)
+      }
+    }
+  }
+  return def
+}
+
+/**
+ * The store keeps JSON, so a storable value must survive the JSON round trip
+ * unchanged. Dates and other class instances, Maps, functions, symbols,
+ * BigInt, NaN and Infinity, holes in arrays, undefined at any depth — all
+ * would come back changed or dropped, so all are "not plain JSON".
+ */
+export function isPlainJson(value: unknown): boolean {
+  try {
+    return isDeepStrictEqual(JSON.parse(JSON.stringify(value)), value)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A relationship between object types, not an existing pair of instances.
+ * `from` and `to` give it an orientation; either end can be a query's starting
+ * point. Cardinality constrains stored relationships, not traversal direction.
+ */
+export interface LinkTypeDef {
+  from: string
+  to: string
+  /**
+   * Cardinality is a model constraint, so it is enforced at the write gate:
+   * for one-to-many, the "many" side belongs to at most one "one" side.
+   */
+  kind: 'one-to-many' | 'many-to-many'
+  /**
+   * Authority declaration for the link's instances. Absent means
+   * source-backed: the snapshot supplies them, rewiring them requires
+   * write-back, and re-indexing replaces them. `owned: true` means the
+   * ontology owns them: `load()` refuses them, actions rewire them without
+   * write-back, and they survive re-indexing.
+   */
+  owned?: true
+  /** Physical origin of the link (a foreign key, a join table) — documentation only. */
+  via?: string
+  description?: string
+}
+
+/** defineOntology checks the endpoints against the assembled model. */
+export function defineLink(def: LinkTypeDef): LinkTypeDef {
+  return def
+}
+
+/** A machine-readable refusal. Agents and UIs receive this, not a stack trace. */
+export interface Violation {
+  code: string
+  message: string
+}
+
+export function reject(code: string, message: string): Violation {
+  return { code, message }
+}
+
+/**
+ * Edits are data: what an action wants to change, decoupled from how it is
+ * applied. Links are edits too — actions can rewire the graph itself, not
+ * just node properties. Deletes are out of scope; see IMPLEMENTATION.md.
+ */
+export type Edit =
+  | { op: 'modify'; object: string; pk: string; changes: Record<string, unknown> }
+  | { op: 'create'; object: string; pk: string; data: Record<string, unknown> }
+  | { op: 'link'; link: string; from: string; to: string }
+  | { op: 'unlink'; link: string; from: string; to: string }
+
+/** Describe a change to an instance; only running an action applies it. */
+// Property names and values are checked during preflight, like create/link.
+export const modify = (object: ObjectInstance, changes: Record<string, unknown>): Edit => ({
+  op: 'modify',
+  object: object.type,
+  pk: object.pk,
+  changes,
+})
+// These helpers only describe edits. Names, payloads and relationship constraints
+// are checked against the model during preflight, before any write-back occurs.
+export const create = (object: string, pk: string, data: Record<string, unknown>): Edit => ({
+  op: 'create',
+  object,
+  pk,
+  data,
+})
+export const link = (linkName: string, from: string, to: string): Edit => ({ op: 'link', link: linkName, from, to })
+export const unlink = (linkName: string, from: string, to: string): Edit => ({ op: 'unlink', link: linkName, from, to })
+
+export interface ActionCtx<O = ObjectInstance, P = Record<string, unknown>> {
+  /** The object the action targets, loaded from the ontology store. */
+  object: O
+  /** Already parsed: schema defaults have been supplied before callbacks run. */
+  params: P
+  actor: string
+}
+
+/**
+ * The schema side of an action — its type. Each `execute()` of this action is one
+ * instance of it, applied or refused, recorded as an audit entry.
+ */
+export interface ActionDef<S extends Properties = Properties, O extends ObjectInstance = ObjectInstance> {
+  /** Object type this action operates on. */
+  object: O['type']
+  /** Name of the param that carries the target's primary key. */
+  targetParam: keyof S & string
+  /** Parameter schema. Reused verbatim as the MCP tool input schema. */
+  params: S
+  description?: string
+  /**
+   * Business rules must be pure, like effects.
+   * Each precondition may return `reject(code, message)` to
+   * refuse the write. These are domain rules ("a shipped order cannot be
+   * cancelled"), not access control — a permission system decides *who* may
+   * act; preconditions decide *whether the operation is valid at all*.
+   */
+  preconditions: Array<(ctx: ActionCtx<O, z.output<z.ZodObject<S>>>) => Violation | void>
+  /**
+   * The changes this action makes, described as data. Effects must be pure:
+   * they describe edits, they do not perform them. Reaching into external
+   * systems from here bypasses write-back ordering and the audit log — side
+   * effects belong to the WritebackAdapter.
+   */
+  effects: (ctx: ActionCtx<O, z.output<z.ZodObject<S>>>) => Edit[]
+  /**
+   * Authority declaration for this action's changes. `writeback: true`
+   * declares them source-backed: the edit plan is routed through the
+   * write-back adapter before commit. Its absence declares them
+   * ontology-owned. The declaration is checked, not trusted — the runtime
+   * classifies every edit plan against the model's `owned` declarations and
+   * refuses a plan on the wrong side of the line (or straddling it).
+   */
+  writeback?: boolean
+}
+
+/**
+ * Give rules the object schema before their callbacks are inferred. Passing
+ * definitions separately lets callback hints come from the selected object
+ * and parameter schemas, without inferring them from the callback bodies.
+ */
+export function defineAction<Objects extends ObjectDefinitions, K extends keyof Objects & string, S extends Properties>(
+  objects: Objects,
+  def: ActionDef<S, ObjectInstance<K, PropertiesOf<Objects[K]>>>,
+): ActionDef<S, ObjectInstance<K, PropertiesOf<Objects[K]>>> {
+  if (!Object.hasOwn(objects, def.object)) throw new Error(`unknown object type "${def.object}"`)
+  if (!Object.hasOwn(def.params, def.targetParam)) {
+    throw new Error(`targetParam "${def.targetParam}" is not one of the action's params`)
+  }
+  return def
+}
+
+/** A named domain read. It must not perform writes or other side effects. */
+export interface FunctionDef<S extends Properties = Properties, Result = unknown> {
+  description?: string
+  params: S
+  /** Use the caller's actor for all reads; return values, not applied edits. */
+  run: (ctx: { params: z.output<z.ZodObject<S>>; actor: string }) => Result
+}
+
+/**
+ * Infer input params from their schema and the result from the implementation.
+ * Result stays as returned, including Promise results; it is not ActionResult.
+ * The read-only contract above is the author's responsibility, not a sandbox.
+ */
+export function defineFunction<S extends Properties, Result>(def: FunctionDef<S, Result>): FunctionDef<S, Result> {
+  return def
+}
+
+export interface OntologyDef {
+  name: string
+  objects: ObjectDefinitions
+  links: Record<string, LinkTypeDef>
+  actions: Record<string, ActionDef<any, any>>
+  functions?: Record<string, FunctionDef<any, any>>
+}
+
+/**
+ * Cross-reference checks need the assembled model. Distinct operation names
+ * keep the generated MCP tools unambiguous across Actions and Functions.
+ * Returning Model, rather than OntologyDef, keeps its specific names and schemas.
+ */
+export function defineOntology<Model extends OntologyDef>(def: Model): Model {
+  for (const name of Object.keys(def.functions ?? {})) {
+    if (Object.hasOwn(def.actions, name)) {
+      throw new Error(`operation "${name}" is defined as both an action and a function`)
+    }
+  }
+  for (const [name, link] of Object.entries(def.links)) {
+    for (const end of [link.from, link.to]) {
+      if (!Object.hasOwn(def.objects, end)) {
+        throw new Error(`link "${name}" references unknown object type "${end}"`)
+      }
+    }
+  }
+  for (const [name, action] of Object.entries(def.actions)) {
+    if (!Object.hasOwn(def.objects, action.object)) {
+      throw new Error(`action "${name}" references unknown object type "${action.object}"`)
+    }
+  }
+  return def
+}
 
 // ───────────────────────────── Write-back ─────────────────────────────
 
@@ -57,7 +348,7 @@ export interface WritebackAdapter {
 
 // ───────────────────────────── Runtime ─────────────────────────────
 
-/** Internal: the sentinel that rolls a preflight transaction back. */
+// A successful preflight deliberately rolls back; other failures propagate.
 class Rollback extends Error {}
 
 const editErrorMessage = (e: unknown): string =>
@@ -67,6 +358,7 @@ const editErrorMessage = (e: unknown): string =>
       ? e.message
       : String(e)
 
+/** `ok` narrows the result to edits or a business refusal; unexpected crashes still throw. */
 export type ActionResult = { ok: true; edits: Edit[] } | { ok: false; error: Violation }
 
 /**
@@ -86,11 +378,17 @@ export interface AuditEntry {
   edits: Edit[] | null
 }
 
-export interface AggregateOptions<O extends ObjectInstance> {
-  filter?: ObjectFilter<O>
-  groupBy: (o: O) => string
-  sum?: (o: O) => number
-}
+// Simple result lookups keep examples readable without constraining input names.
+// A dynamic name has an unknown result; schemas still check values at runtime.
+type ObjectDefinitions = Record<string, ObjectTypeDef<any>>
+type PropertiesOf<Definition extends ObjectTypeDef<any>> = z.output<z.ZodObject<Definition['properties']>>
+export type ObjectOf<Model extends OntologyDef, Name extends string> =
+  Name extends keyof Model['objects'] ? ObjectInstance<Name, PropertiesOf<Model['objects'][Name]>> : ObjectInstance
+export type FunctionResultOf<Model extends OntologyDef, Name extends string> =
+  Name extends keyof NonNullable<Model['functions']> ? ReturnType<NonNullable<Model['functions']>[Name]['run']> : unknown
+export type Direction = 'forward' | 'reverse'
+/** Omit direction when only one end fits; Runtime rejects ambiguous or impossible choices. */
+export interface TraverseOptions { actor: string; direction?: Direction }
 
 /**
  * The four answers this implementation declares, as one enumerable value —
@@ -107,25 +405,29 @@ export const declarations = {
 } as const
 
 /**
- * The ontology's own store — object state, user edits, and the audit log —
- * separate from the source systems it was indexed from. A read-only layer
- * could stay virtual; a layer that accepts writes has to own state
- * (edits exist here before, or instead of, the systems of record).
+ * Interpret one model. Model is kept only for simple get/search/call result
+ * lookups; operation inputs use strings and plain data, checked at runtime.
+ * SQLite holds ontology state separately from the indexed source systems.
  */
 export class Runtime<Model extends OntologyDef = OntologyDef> {
   readonly ontology: Model
   readonly declarations = declarations
   readonly #db: Database
-  readonly #writeback?: WritebackAdapter
   readonly #schemas = new Map<string, z.ZodObject<Properties>>()
+  readonly #writeback?: WritebackAdapter
 
   constructor(ontology: Model, db: Database, opts: { writeback?: WritebackAdapter } = {}) {
-    this.ontology = ontology
-    this.#db = db
+    // A caller may pass a plain definition without using defineOntology first.
+    this.ontology = defineOntology(ontology)
     this.#writeback = opts.writeback
-    for (const [name, obj] of Object.entries(ontology.objects)) {
+    this.#db = db
+    for (const [name, obj] of Object.entries(this.ontology.objects)) {
       this.#schemas.set(name, z.object(obj.properties))
     }
+    // objects holds effective JSON rows; links holds instance pairs whose types
+    // come from the model. Including type/name in keys keeps identities distinct.
+    // overlay holds current owned patches for re-indexing, while audit_log holds
+    // the history of Action attempts. An overlay is state, not an event log.
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS objects (
         type TEXT NOT NULL, pk TEXT NOT NULL, data TEXT NOT NULL,
@@ -165,12 +467,14 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
    * "Re-indexing vs edits" in IMPLEMENTATION.md.
    */
   load(snapshot: {
-    objects?: { [K in ObjectName<Model>]?: Record<string, unknown>[] }
-    links?: { [Link in LinkName<Model>]?: Array<[from: string, to: string]> }
+    objects?: Record<string, Record<string, unknown>[]>
+    links?: Record<string, Array<[from: string, to: string]>>
   }): void {
     this.#refuseOpenTransaction('load')
     const insertObject = this.#db.prepare('INSERT INTO objects (type, pk, data) VALUES (?, ?, ?)')
     const insertLink = this.#db.prepare('INSERT OR REPLACE INTO links (name, from_pk, to_pk) VALUES (?, ?, ?)')
+    // One transaction covers all supplied types. Check relationships after the
+    // replacements, so a snapshot can supply both new endpoints and their links.
     this.#db.transaction(() => {
       const objectEntries = Object.entries(snapshot.objects ?? {}) as Array<[string, Record<string, unknown>[]]>
       for (const [type, rows] of objectEntries) {
@@ -258,79 +562,65 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
 
   // ── Read side: query the model, not the tables — and always as someone ──
 
-  get<K extends ObjectName<Model>>(type: K, pk: string, opts: { actor: string }): ObjectOf<Model, K> | undefined {
+  /** The selected type determines properties; hidden and missing IDs both yield undefined. */
+  get<K extends string>(type: K, pk: string, opts: { actor: string }): ObjectOf<Model, K> | undefined {
     return this.#read<ObjectOf<Model, K>>(type, pk, opts.actor)
   }
 
-  search<K extends ObjectName<Model>>(
-    type: K,
-    opts: { actor: string; filter?: ObjectFilter<ObjectOf<Model, K>> },
-  ): ObjectOf<Model, K>[] {
-    return this.#scan<ObjectOf<Model, K>>(type, opts.actor, opts.filter)
+  /** Read visible objects, then apply the caller's predicate to those snapshots. */
+  search<K extends string>(type: K, opts: { actor: string; filter?: ObjectFilter<ObjectOf<Model, K>> }): ObjectSet<ObjectOf<Model, K>> {
+    const set = query.objectSet(type, this.#scan(type, opts.actor) as ObjectOf<Model, K>[])
+    return opts.filter === undefined ? set : query.filterObjects(set, opts.filter)
   }
 
-  /** Follow a link from an instance. A self-type link needs an explicit direction. */
-  // Infer the source, then the link; check options against those choices.
-  // NoInfer stops a Customer from becoming Customer | Employee to accept 'manages',
-  // or Customer | Order to accept 'reverse' on customerOrders.
-  traverse<Source extends ObjectName<Model>, Link extends LinksFrom<Model, NoInfer<Source>>>(
-    source: ObjectOf<Model, Source>,
-    linkName: Link,
-    opts: TraverseOptions<Model, NoInfer<Source>, NoInfer<Link>>,
-  ): ObjectOf<Model, LinkTarget<Model, Source, Link>>[] {
-    if (
-      !source || typeof source.type !== 'string' || typeof source.pk !== 'string' ||
-      !source.properties || typeof source.properties !== 'object' || Array.isArray(source.properties)
-    ) {
+  /** Links, endpoints and direction are checked from the model at execution time. */
+  traverse(source: ObjectInstance, linkName: string, opts: TraverseOptions): ObjectSet {
+    if (!source || typeof source.type !== 'string' || typeof source.pk !== 'string' ||
+        !source.properties || typeof source.properties !== 'object' || Array.isArray(source.properties)) {
       throw new Error('traverse() requires an object instance with type, pk, and properties')
     }
-    const link = Object.hasOwn(this.ontology.links, linkName) ? this.ontology.links[linkName] : undefined
-    if (!link) throw new Error(`unknown link type "${linkName}"`)
-    const forward = source.type === link.from
-    const reverse = source.type === link.to
-    if (!forward && !reverse) throw new Error(`link "${linkName}" does not connect "${source.type}"`)
-    if (forward && reverse && opts.direction === undefined) {
-      throw new Error(`link "${linkName}" requires a direction from "${source.type}"`)
-    }
-    const direction = opts.direction === undefined ? (forward ? 'forward' : 'reverse') : opts.direction
-    if (!((direction === 'forward' && forward) || (direction === 'reverse' && reverse))) {
-      throw new Error(`invalid direction "${direction}" for link "${linkName}" from "${source.type}"`)
-    }
-    const [where, select, targetType] = direction === 'forward'
-      ? ['from_pk', 'to_pk', link.to]
-      : ['to_pk', 'from_pk', link.from]
-    // The input is a snapshot, not authority. Re-read the origin under this actor.
-    if (!this.#read(source.type, source.pk, opts.actor)) return []
-    const rows = this.#db
-      .prepare(`SELECT ${select} AS pk FROM links WHERE name = ? AND ${where} = ? ORDER BY pk`)
-      .all(linkName, source.pk) as { pk: string }[]
-    return rows
-      .map((r) => this.#read<ObjectOf<Model, LinkTarget<Model, Source, Link>>>(targetType, r.pk, opts.actor))
-      .filter((o) => o !== undefined)
+    return this.#follow(source.type, [source.pk], linkName, opts)
   }
 
-  /** Query-time aggregation over the indexed objects. Nothing is precomputed. */
-  aggregate<K extends ObjectName<Model>>(
-    type: K,
-    opts: { actor: string } & AggregateOptions<ObjectOf<Model, K>>,
-  ): Record<string, { count: number; sum?: number }> {
-    // Accumulate in a Map: group keys are data, and data named "__proto__"
-    // must not walk — let alone pollute — the prototype chain.
-    const out = new Map<string, { count: number; sum?: number }>()
-    for (const obj of this.#scan<ObjectOf<Model, K>>(type, opts.actor, opts.filter)) {
-      const key = opts.groupBy(obj)
-      let bucket = out.get(key)
-      if (!bucket) {
-        bucket = { count: 0, ...(opts.sum ? { sum: 0 } : {}) }
-        out.set(key, bucket)
-      }
-      bucket.count += 1
-      if (opts.sum) bucket.sum = (bucket.sum ?? 0) + opts.sum(obj)
-    }
-    return Object.fromEntries(out)
+  /** Follow a relationship from a whole set; the output tag is known at runtime. */
+  pivot(source: ObjectSet, linkName: string, opts: TraverseOptions): ObjectSet {
+    const set = query.objectSet(source.type, source.objects)
+    return this.#follow(set.type, set.objects.map((o) => o.pk), linkName, opts)
   }
 
-  // ── Write side: there is exactly one door in the API ──
+  /** Filter snapshots or metric rows locally; neither callback is sent over MCP. */
+  filter<O extends ObjectInstance>(input: ObjectSet<O>, predicate: ObjectFilter<O>): ObjectSet<O>
+  filter<O extends ObjectInstance>(
+    input: AggregationResult<O>, predicate: (row: AggregationRow) => boolean,
+  ): AggregationResult<O>
+  filter(input: ObjectSet | AggregationResult, predicate: unknown): ObjectSet | AggregationResult {
+    if ('set' in input) return query.filterAggregation(input, predicate as (row: AggregationRow) => boolean)
+    return query.filterObjects(input, predicate as ObjectFilter)
+  }
+
+  /** Set algebra checks matching tags at runtime and preserves the left snapshots. */
+  union(a: ObjectSet, b: ObjectSet): ObjectSet { return query.combine('union', a, b) }
+  intersect(a: ObjectSet, b: ObjectSet): ObjectSet { return query.combine('intersect', a, b) }
+  subtract(a: ObjectSet, b: ObjectSet): ObjectSet { return query.combine('subtract', a, b) }
+
+  /** Results have count, plus sum when requested. The schema checks grouping and numeric fields. */
+  aggregate<O extends ObjectInstance>(set: ObjectSet<O>, options: { groupBy: string; sum?: string }): AggregationResult<O> {
+    const def = Object.hasOwn(this.ontology.objects, set.type) ? this.ontology.objects[set.type] : undefined
+    if (!def) throw new Error(`unknown object type "${set.type}"`)
+    return query.aggregate(set, options, def.properties)
+  }
+
+  /** Validate Function params and return its value, including a Promise. Reads are not audited. */
+  call<Name extends string>(
+    name: Name, params: Record<string, unknown>, opts: { actor: string },
+  ): FunctionResultOf<Model, Name> {
+    const functions = this.ontology.functions
+    const fn = functions && Object.hasOwn(functions, name) ? functions[name] : undefined
+    if (!fn) throw new Error(`unknown function "${name}"`)
+    return fn.run({ params: z.object(fn.params).parse(params), actor: opts.actor })
+  }
+
+  // ── Write side: every change goes through an action ──
 
   /**
    * Execute an action. This is the only way the API changes state:
@@ -340,11 +630,9 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
    * audit entry. Validity precedes authority: a plan the store would refuse
    * is INVALID_EDITS, whatever else it is.
    */
-  execute<A extends ActionName<Model>>(actionName: A, params: ParamsOf<Model, A>, opts: { actor: string }): ActionResult {
+  execute(actionName: string, params: Record<string, unknown>, opts: { actor: string }): ActionResult {
     this.#refuseOpenTransaction('execute')
-    // From here on the params are raw input: the schema, not the type, decides.
-    const raw = params as Record<string, unknown>
-    // Every attempt is audited — including the ones that never reach the model.
+    // Every execution attempt is audited, including early refusals.
     const refuseAs = (
       target: string,
       auditParams: Record<string, unknown>,
@@ -367,27 +655,27 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       ? this.ontology.actions[actionName]
       : undefined
     if (!action) {
-      return refuseAs('(unknown action)', raw, reject('UNKNOWN_ACTION', `no action named "${actionName}"`))
+      return refuseAs('(unknown action)', params, reject('UNKNOWN_ACTION', `no action named "${actionName}"`))
     }
 
     const guessTarget = () => {
-      const guessed = raw[action.targetParam]
+      const guessed = params[action.targetParam]
       return `${action.object}/${guessed != null ? String(guessed) : '(invalid)'}`
     }
 
     // Params are stored verbatim in the audit log, so they must be values
     // the log can hold faithfully — refused here, and still audited (the
     // audit write falls back to a placeholder for what it cannot encode).
-    if (!isPlainJson(raw)) {
-      return refuseAs(guessTarget(), raw, reject('INVALID_PARAMS', 'params are not plain JSON data'))
+    if (!isPlainJson(params)) {
+      return refuseAs(guessTarget(), params, reject('INVALID_PARAMS', 'params are not plain JSON data'))
     }
 
-    const parsed = z.object(action.params).safeParse(raw)
+    const parsed = z.object(action.params).safeParse(params)
     if (!parsed.success) {
       const issue = parsed.error.issues[0]
       return refuseAs(
         guessTarget(),
-        raw,
+        params,
         reject('INVALID_PARAMS', `${issue?.path.join('.') ?? 'params'}: ${issue?.message ?? 'invalid'}`),
       )
     }
@@ -396,8 +684,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     const target = `${action.object}/${pk}`
     const refuse = (error: Violation, edits?: Edit[]): ActionResult => refuseAs(target, parsed.data, error, edits)
 
-    // Crashes are attempts too — audited as EXECUTION_CRASHED, then the
-    // error surfaces to the caller.
+    // Execution crashes are audited as EXECUTION_CRASHED, then rethrown.
     const crashed = (e: unknown): never => {
       this.#audit({
         actor: opts.actor,
@@ -534,7 +821,8 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return { ok: true, edits }
   }
 
-  auditLog(filter: { action?: ActionName<Model>; status?: 'applied' | 'rejected'; target?: string } = {}): AuditEntry[] {
+  /** Administrative history, not an actor-scoped object query. */
+  auditLog(filter: { action?: string; status?: 'applied' | 'rejected'; target?: string } = {}): AuditEntry[] {
     const rows = this.#db.prepare('SELECT * FROM audit_log ORDER BY seq').all() as Array<{
       seq: number
       ts: string
@@ -561,7 +849,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       )
   }
 
-  // ── Private: the only code that touches object state ──
+  // ─────────────── Internal helpers ───────────────
 
   /**
    * Inside a caller's transaction, "committed" would mean "until the caller
@@ -589,6 +877,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
    * `owned` declarations — or the Violation for an edit no side can legally
    * hold. Runs after the preflight, so every edit it sees is one the store
    * would accept (empty modifies included: they were already refused).
+   * This classifies who owns the state, not which actor is allowed to act.
    */
   #editAuthority(edit: Edit): 'source' | 'ontology' | Violation {
     if (edit.op === 'link' || edit.op === 'unlink') {
@@ -645,26 +934,14 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return JSON.stringify(value)
   }
 
-  /** A read snapshot, scoped to the actor. Hidden and missing objects are alike. */
-  #read<O extends ObjectInstance = ObjectInstance>(type: string, pk: string, actor: string): O | undefined {
-    const properties = this.#fetch(type, pk)
-    if (properties === undefined) return undefined
-    const object = { type, pk, properties } as O
-    return this.#visible(object, actor) ? object : undefined
+  // User reads apply visibility; integrity checks need the complete graph,
+  // including endpoints that this particular caller cannot see.
+  #visible(object: ObjectInstance, actor: string): boolean {
+    const visibility = this.ontology.objects[object.type]?.visibility
+    return visibility ? visibility({ object, actor }) : true
   }
 
-  #scan<O extends ObjectInstance = ObjectInstance>(type: string, actor: string, filter?: ObjectFilter<O>): O[] {
-    this.#objectDef(type)
-    const rows = this.#db.prepare('SELECT pk, data FROM objects WHERE type = ? ORDER BY pk').all(type) as {
-      pk: string; data: string
-    }[]
-    return rows
-      .map((r) => ({ type, pk: r.pk, properties: JSON.parse(r.data) }) as O)
-      .filter((o) => this.#visible(o, actor))
-      .filter(matcher(filter))
-  }
-
-  /** Raw properties without visibility — for internal integrity checks only. */
+  /** Raw properties for integrity checks. User reads pass through #read to apply visibility. */
   #fetch(type: string, pk: string): Record<string, unknown> | undefined {
     this.#objectDef(type)
     const row = this.#db
@@ -673,11 +950,65 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     return row ? JSON.parse(row.data) : undefined
   }
 
-  #visible(object: ObjectInstance, actor: string): boolean {
-    const visibility = this.ontology.objects[object.type]?.visibility
-    return visibility ? visibility({ object, actor }) : true
+  /** A read snapshot, scoped to the actor. Hidden and missing objects are alike. */
+  #read<O extends ObjectInstance = ObjectInstance>(type: string, pk: string, actor: string): O | undefined {
+    const properties = this.#fetch(type, pk)
+    if (properties === undefined) return undefined
+    // Store rows use dynamic names; the public signature restores the model's
+    // name/property pairing. The assertion itself performs no schema validation.
+    const object = { type, pk, properties } as O
+    return this.#visible(object, actor) ? object : undefined
   }
 
+  #scan(type: string, actor: string): ObjectInstance[] {
+    this.#objectDef(type)
+    const rows = this.#db.prepare('SELECT pk, data FROM objects WHERE type = ? ORDER BY pk').all(type) as {
+      pk: string; data: string
+    }[]
+    return rows.map((r) => ({ type, pk: r.pk, properties: JSON.parse(r.data) }))
+      .filter((object) => this.#visible(object, actor))
+  }
+
+  /** Return neighbor IDs; #follow re-reads endpoints to apply the caller's visibility. */
+  #related(link: string, direction: 'forward' | 'reverse', pk: string): { pk: string }[] {
+    // Reverse traversal swaps fixed column names; link names and IDs remain bound values.
+    const [where, select] = direction === 'forward' ? ['from_pk', 'to_pk'] : ['to_pk', 'from_pk']
+    return this.#db.prepare(`SELECT ${select} AS pk FROM links WHERE name = ? AND ${where} = ? ORDER BY pk`)
+      .all(link, pk) as { pk: string }[]
+  }
+
+  /** Traversal always re-reads both ends as this actor; snapshots are not authority. */
+  #follow(type: string, pks: readonly string[], linkName: string, opts: TraverseOptions): ObjectSet {
+    // Check the schema before iterating: an empty set must not hide a bad link
+    // or an ambiguous direction, regardless of the caller's language.
+    const link = Object.hasOwn(this.ontology.links, linkName) ? this.ontology.links[linkName] : undefined
+    if (!link) throw new Error(`unknown link type "${linkName}"`)
+    const forward = type === link.from
+    const reverse = type === link.to
+    if (!forward && !reverse) throw new Error(`link "${linkName}" does not connect "${type}"`)
+    if (forward && reverse && opts.direction === undefined) throw new Error(`link "${linkName}" requires a direction from "${type}"`)
+    const direction = opts.direction === undefined ? (forward ? 'forward' : 'reverse') : opts.direction
+    if (!((direction === 'forward' && forward) || (direction === 'reverse' && reverse))) {
+      throw new Error(`invalid direction "${direction}" for link "${linkName}" from "${type}"`)
+    }
+    const target = direction === 'forward' ? link.to : link.from
+    const objects: ObjectInstance[] = []
+    for (const pk of pks) {
+      if (!this.#read(type, pk, opts.actor)) continue
+      for (const row of this.#related(linkName, direction, pk)) {
+        const object = this.#read(target, row.pk, opts.actor)
+        if (object) objects.push(object)
+      }
+    }
+    // Several sources can reach the same target; a pivot returns objects, not paths.
+    return query.objectSet(target, objects)
+  }
+
+  /**
+   * Shared by preflight and commit, each inside its caller's transaction.
+   * Plan order is meaningful: create before linking, unlink before rewiring
+   * a one-to-many relationship. Do not silently reorder the author's edits.
+   */
   #applyEdits(edits: Edit[]): void {
     for (const edit of edits) {
       if (edit.op === 'link' || edit.op === 'unlink') {
@@ -744,6 +1075,8 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
       }
       const current = this.#fetch(edit.object, edit.pk)
       if (!current) throw new Error(`cannot modify missing object ${edit.object}/${edit.pk}`)
+      // Validate the resulting whole object, not a partial patch against a full
+      // schema. Untouched required properties remain present during validation.
       const next = schema.parse({ ...current, ...edit.changes })
       this.#db
         .prepare('UPDATE objects SET data = ? WHERE type = ? AND pk = ?')
@@ -775,7 +1108,10 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     }
   }
 
-  /** The indexed snapshot must satisfy the model's constraints, same as edits do. */
+  /**
+   * Check every surviving link, including those not replaced by this load.
+   * A partial refresh can otherwise remove endpoints of an untouched link.
+   */
   #validateLinks(): void {
     for (const [name, link] of Object.entries(this.ontology.links)) {
       const rows = this.#db
@@ -800,6 +1136,10 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
     }
   }
 
+  /**
+   * Append only. Success calls this inside the edit transaction. The Action gate
+   * records refusals separately even when no business edits were applied.
+   */
   #audit(entry: {
     actor: string
     action: string
@@ -828,9 +1168,9 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
 }
 
 /**
- * The audit write must never be the thing that fails: a value the log cannot
- * encode is recorded as a placeholder, because a lost audit entry is worse
- * than a lossy one.
+ * Best-effort encoding for rejected raw input: use a placeholder when ordinary
+ * JSON encoding fails. This preserves some context instead of losing the entry;
+ * it does not suppress database errors or guarantee every value can be logged.
  */
 function safeJson(value: unknown): string {
   try {
@@ -842,17 +1182,11 @@ function safeJson(value: unknown): string {
   return JSON.stringify({ $unserializable: String(value) })
 }
 
+/** Preserve the supplied model type instead of returning an unspecialized Runtime. */
 export function createRuntime<Model extends OntologyDef>(
   ontology: Model,
   db: Database,
   opts: { writeback?: WritebackAdapter } = {},
 ): Runtime<Model> {
   return new Runtime(ontology, db, opts)
-}
-
-function matcher<O extends ObjectInstance>(filter?: ObjectFilter<O>): (o: O) => boolean {
-  if (!filter) return () => true
-  if (typeof filter === 'function') return filter
-  const entries = Object.entries(filter)
-  return (o: O) => entries.every(([k, v]) => o.properties[k] === v)
 }

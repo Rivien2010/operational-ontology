@@ -20,7 +20,7 @@ Gray: source-backed state. Orange: ontology-owned state. The diagram shows all o
   <img src="https://i.ytimg.com/vi/WOcqXcSs388/maxresdefault.jpg" alt="Ontology: Investigative Analysis Explained | Finance" width="640">
 </a>
 
-The API differs from the version used to make the video. See [`demo.ts`](./demo.ts) for current calls.
+[`demo.ts`](./demo.ts) follows the video's exploration and evidence flow.
 
 The demo follows outgoing transfers from each origin, filters September 8 afternoon, and pivots to recipients:
 
@@ -30,9 +30,11 @@ The demo follows outgoing transfers from each origin, filters September 8 aftern
 | B | X, W |
 | C | X, Z |
 
-The demo prints both inputs and the result of each set operation, with types, IDs and counts. Union collects all recipients: X, Y, W and Z. Intersecting A and B's recipients first gives X and W; intersecting that result with C's recipients leaves X. Subtracting this common set from all recipients leaves Y, W and Z. These operations compare account identities; they do not aggregate transfer amounts.
+The demo prints both inputs and the result of each set operation, with types, IDs and counts. Intersecting A and B's recipients first gives X and W; intersecting that result with C's recipients leaves X. These operations compare account identities; they do not aggregate transfer amounts.
 
-X was not specified as a target at the start: comparing A, B and C's recipients reveals it as the one shared by all three. A model Function, `recipientSummary`, provides the complementary aggregate route:
+X was not specified as a target at the start: comparing A, B and C's recipients reveals it as the one shared by all three. Pivoting from X through `incoming` returns seven transfers. The demo unions the three saved origin/time-scoped transfer sets, then intersects that scope with X's incoming transfers. Four remain: T1a, T1b, T3 and T4. T8 is from the previous day, T10 is from the morning, and T9 comes from D. Pivoting the evidence back to senders gives three accounts, while summing the four transfer amounts gives 5,100,000 yen. These same four evidence IDs go to the Action.
+
+A model Function, `recipientSummary`, provides a complementary comparison across recipients:
 
 | Recipient | Distinct senders | Transfers | Total yen |
 | --- | --- | --- | --- |

@@ -109,20 +109,19 @@ export function buildMcpServer<Model extends OntologyDef>(rt: Runtime<Model>, op
     const propertyKeys = Object.entries(def.properties).filter(([, schema]) => fieldKind(schema as z.ZodType)).map(([key]) => key) as [string, ...string[]]
     const numericKeys = Object.entries(def.properties).filter(([, schema]) => fieldKind(schema as z.ZodType) === 'number').map(([key]) => key)
     const aggregateShape: Record<string, z.ZodType> = {
-      pks: z.array(z.string()), group_by: z.enum(propertyKeys),
+      pks: z.array(z.string()), group_by: z.enum(propertyKeys).optional(),
     }
     if (numericKeys.length > 0) aggregateShape.sum = z.enum(numericKeys as [string, ...string[]]).optional()
     server.registerTool(
       toolName(`aggregate_${snake(typeName)}`, `aggregate ${typeName}`),
       {
-        description: `Group the selected ${typeName} objects by one property, count members and optionally sum a numeric property. Returns set and values; each row has a key, member pks and a numeric metrics object. Filter metric rows in client-side code and use their pks to continue exploring.`,
+        description: `Count the selected ${typeName} objects and optionally sum a numeric property. Omit group_by for one whole-set total (key: null, zero metrics for an empty set), or group by a property. Returns set and values; each row has a key, member pks and numeric metrics. Filter rows in client-side code and use their pks to continue exploring.`,
         inputSchema: z.object(aggregateShape).strict(),
       },
       guarded(async (rawArgs: Record<string, unknown>, extra: { sessionId?: string }) => {
-        const args = rawArgs as { pks: string[]; group_by: string; sum?: string }
+        const args = rawArgs as { pks: string[]; group_by?: string; sum?: string }
         const set = hydrate(typeName, args.pks, actorOf(extra))
-        return asJson(args.sum === undefined ? rt.aggregate(set, { groupBy: args.group_by })
-          : rt.aggregate(set, { groupBy: args.group_by, sum: args.sum }))
+        return asJson(rt.aggregate(set, { groupBy: args.group_by, sum: args.sum }))
       }),
     )
   }

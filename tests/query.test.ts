@@ -100,6 +100,38 @@ test('filtering aggregate rows keeps the corresponding members and does not reco
   assert.deepEqual(rt.auditLog(), [])
 })
 
+test('omitting groupBy totals the selected set and keeps its member IDs for filtering', (t) => {
+  const rt = runtime(t)
+  const input = rt.search('Lot', { actor: 'admin' })
+  const total = rt.aggregate(input, { sum: 'units' })
+  assert.deepEqual(total, { set: input, values: [
+    { key: null, pks: ['L1', 'L2', 'L3', 'L4'], metrics: { count: 4, sum: 140 } },
+  ] })
+  assert.deepEqual(rt.aggregate(input).values, [
+    { key: null, pks: ['L1', 'L2', 'L3', 'L4'], metrics: { count: 4 } },
+  ])
+  assert.deepEqual(rt.filter(total, (row) => row.metrics.sum >= 100), total)
+  assert.deepEqual(rt.filter(total, (row) => row.metrics.sum > 140), {
+    set: { type: 'Lot', objects: [] }, values: [],
+  })
+  const duplicated = { type: 'Lot', objects: [input.objects[0], input.objects[0], input.objects[1]] }
+  assert.deepEqual(rt.aggregate(duplicated, { sum: 'units' }).values, [
+    { key: null, pks: ['L1', 'L2'], metrics: { count: 2, sum: 70 } },
+  ])
+  assert.deepEqual(rt.auditLog(), [])
+})
+
+test('an empty set has a zero total but no property groups', (t) => {
+  const rt = runtime(t)
+  const empty = objectSet('Lot', [] as Lot[])
+  const total = rt.aggregate(empty, { sum: 'units' })
+  assert.deepEqual(total, { set: empty, values: [{ key: null, pks: [], metrics: { count: 0, sum: 0 } }] })
+  assert.deepEqual(rt.aggregate(empty).values, [{ key: null, pks: [], metrics: { count: 0 } }])
+  assert.deepEqual(rt.aggregate(empty, { groupBy: 'family', sum: 'units' }), { set: empty, values: [] })
+  assert.deepEqual(rt.filter(total, (row) => row.metrics.count === 0), total)
+  assert.deepEqual(rt.filter(total, (row) => row.metrics.count > 0), { set: empty, values: [] })
+})
+
 test('groupBy preserves numeric and boolean keys, including zero and false', () => {
   const second = lot('L2', 'B', 10)
   second.properties.released = false
@@ -186,6 +218,11 @@ test('public APIs reject model-specific mistakes without TypeScript navigation c
   const empty = rt.filter(input, () => false)
   assert.throws(() => rt.aggregate(empty, { groupBy: 'unknown' }), /invalid groupBy/)
   assert.throws(() => rt.aggregate(input, { groupBy: 'family', sum: 'quality' }), /sum requires a numeric property/)
+  for (const set of [input, empty]) {
+    for (const sum of ['unknown', 'family', '__proto__']) {
+      assert.throws(() => rt.aggregate(set, { sum }), /sum requires a numeric property/)
+    }
+  }
   const grouped = rt.aggregate(input, { groupBy: 'family' })
   assert.deepEqual(ids(rt.filter(grouped, (row) => row.metrics.count >= 2).set), ['L1', 'L2', 'L3'])
   assert.deepEqual(rt.auditLog(), [], 'query errors never perform writes or audit actions')

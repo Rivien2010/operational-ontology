@@ -72,12 +72,17 @@ const remaining = rt.subtract(orders, both)
 
 For dates, the examples compare `Date.parse(...)` values so different UTC offsets compare as instants. Dates remain strings in stored properties.
 
-`aggregate(set, { groupBy, sum? })` groups by one scalar property, always computes `count`, and optionally sums one numeric property. Its result has two parts:
+`aggregate(set, { groupBy?, sum? })` always computes `count` and optionally sums one numeric property. Omit `groupBy` to aggregate the whole set; supply a scalar property to aggregate each group. Calling `aggregate(set)` counts the whole set. Its result has two parts:
 
 - `set`: the input objects belonging to its groups.
-- `values`: rows containing a scalar `key`, member `pks`, and a `metrics` object such as `{ count: 2, sum: 5000 }`.
+- `values`: rows containing a group `key` (a scalar, or `null` for a whole-set total), member `pks`, and a `metrics` object such as `{ count: 2, sum: 5000 }`.
+
+A whole-set aggregation returns exactly one row, even for an empty set: `count` is 0 and a requested `sum` is 0. Grouping an empty set by a property returns no rows. Counts and sums use unique object IDs, so reaching an object by several paths does not count it twice.
 
 ```ts
+const total = rt.aggregate(pending, { sum: 'total' })
+console.log(total.values[0].metrics) // Count and sum for all selected orders; key is null
+
 const grouped = rt.aggregate(pending, { groupBy: 'status', sum: 'total' })
 const selected = rt.filter(grouped, (row) => row.metrics.sum >= 10000)
 console.log(selected.values) // Selected rows, with their original metrics
@@ -88,7 +93,7 @@ Filtering an aggregation applies the predicate to its rows and retains the union
 
 Model Functions can return the same `AggregationResult<O>` shape for link-based or custom metrics. For example, finance returns recipient **accounts** with `senderCount`, `transactionCount` and `totalAmount`, computed from **transfers**. `aggregationResult(set, values)` validates finite numeric metrics, unique group keys and member references, and forms the corresponding set. `metrics` is a `Readonly<Record<string, number>>`. Producers keep metric names consistent; typos and missing columns are not checked, and reading an absent metric yields `undefined` at runtime.
 
-Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Aggregation supports optional/nullable/default wrappers around scalar properties, but grouping by a null or missing value or summing one throws.
+Each row's `pks` refer to its target set, not automatically to its evidence records. Evidence sets live alongside the aggregation in the Function result; callers select the evidence for the chosen target. Aggregation supports optional/nullable/default wrappers around scalar properties, but grouping by a null or missing property value or summing one throws. A total's `key: null` marks the absence of grouping, not a null-valued property group; it is also the only row kind that allows empty `pks`.
 
 ## MCP query inputs
 
@@ -99,7 +104,7 @@ The model generates `search_<type>`, `get_<type>`, `union_<type>`, `intersect_<t
 | `search_<type>` | `{}`; all objects visible to this session. |
 | `get_<type>` | `{ <primaryKey>: value }` |
 | `union/intersect/subtract_<type>` | `{ left: pks, right: pks }` |
-| `aggregate_<type>` | `{ pks, group_by, sum? }` |
+| `aggregate_<type>` | `{ pks, group_by?, sum? }`; omit `group_by` for a whole-set total. |
 | `traverse_<link>` | `{ source: { type, pk, properties }, direction? }` |
 | `pivot_<link>` | `{ source: { type, pks }, direction? }` |
 

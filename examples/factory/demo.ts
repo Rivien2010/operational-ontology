@@ -50,7 +50,9 @@ try {
   log('\n  Aggregate: sum units on the retained ShipmentLine records')
   showObjects('input', shippedAffected)
   console.table(shippedAffected.objects.map(({ pk, properties }) => ({ line: pk, units: properties.units })))
-  const affectedUnits = shippedAffected.objects.reduce((sum, line) => sum + (line.properties.units as number), 0)
+  const impact = rt.aggregate(shippedAffected, { sum: 'units' })
+  console.table(impact.values.map(({ pks, metrics }) => ({ lines: pks.join(', '), ...metrics })))
+  const affectedUnits = impact.values[0].metrics.sum
   log('Units in evidence:', affectedUnits)
   log('These are 50 shipped units: 10 + 20 + 20. The selected lots contain 60 units including 10 unshipped; the shipped shipments contain 55 including 5 from L4.')
 

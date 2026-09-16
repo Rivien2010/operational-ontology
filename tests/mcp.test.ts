@@ -47,11 +47,21 @@ test('MCP clients filter locally and pass IDs to tools that reload visible membe
   assert.deepEqual(selected.map((object: { pk: string }) => object.pk), ['I3'])
   const grouped = await call('aggregate_item', { pks: ['I1', 'I2', 'I3'], group_by: 'category', sum: 'amount' })
   assert.deepEqual(grouped.values, [{ key: 'A', pks: ['I1'], metrics: { count: 1, sum: 10 } }, { key: 'B', pks: ['I3'], metrics: { count: 1, sum: 30 } }])
+  // Whole-set totals still reload visible IDs and count each object only once.
+  const total = await call('aggregate_item', { pks: ['I1', 'I2', 'I3', 'I1', 'missing'], sum: 'amount' })
+  assert.deepEqual(ids(total.set), ['I1', 'I3'])
+  assert.deepEqual(total.values, [{ key: null, pks: ['I1', 'I3'], metrics: { count: 2, sum: 40 } }])
+  assert.deepEqual((await call('aggregate_item', { pks: ['I1', 'I2', 'I3'] })).values,
+    [{ key: null, pks: ['I1', 'I3'], metrics: { count: 2 } }])
   const selectedIds = grouped.values.filter((row: { metrics: Record<string, number> }) => row.metrics.sum >= 20).flatMap((row: { pks: string[] }) => row.pks)
   assert.deepEqual(selectedIds, ['I3'])
   // The next tool rechecks current visibility, even for IDs from an earlier read.
   rt.load({ objects: { Item: [{ id: 'I3', owner: 'agent:bob', category: 'B', amount: 30 }] } })
   assert.deepEqual((await call('aggregate_item', { pks: selectedIds, group_by: 'category', sum: 'amount' })).set.objects, [])
+  assert.deepEqual(await call('aggregate_item', { pks: selectedIds, sum: 'amount' }), {
+    set: { type: 'Item', objects: [] }, values: [{ key: null, pks: [], metrics: { count: 0, sum: 0 } }],
+  })
+  assert.deepEqual((await call('aggregate_item', { pks: [] })).values, [{ key: null, pks: [], metrics: { count: 0 } }])
   assert.equal((await client.listTools()).tools.some((tool) => tool.name.startsWith('filter_')), false)
   for (const args of [{ amount: 10 }, { where: [] }, { predicate: 'object => true' }, { code: 'return []' }]) {
     assert.equal((await client.callTool({ name: 'search_item', arguments: args })).isError, true)
@@ -214,6 +224,9 @@ test('aggregate rejects property names the model does not define', async () => {
   const { client } = await connectedClient()
   const result = await client.callTool({ name: 'aggregate_order', arguments: { pks: [], group_by: 'nonexistent' } })
   assert.equal(result.isError, true)
+  for (const sum of ['nonexistent', 'status']) {
+    assert.equal((await client.callTool({ name: 'aggregate_order', arguments: { pks: [], sum } })).isError, true)
+  }
 })
 
 test('wrapped numeric properties (nullable/optional/defaulted/stacked) are still summable', async () => {

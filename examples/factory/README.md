@@ -18,7 +18,7 @@ Gray: source-backed state. Orange: ontology-owned state. The diagram shows all o
 
 [`demo.ts`](./demo.ts) follows the video's exploration and evidence flow.
 
-`demo.ts` uses the runtime's filter, pivot and set operations directly. Each operation prints its input and result types, IDs and counts:
+`demo.ts` uses the runtime's filter, pivot, set operations and aggregation directly. Each operation prints its input and result types, IDs and counts:
 
 | Step | Result |
 | --- | --- |
@@ -49,4 +49,4 @@ Run `pnpm mcp:factory`, or connect from the repository root with:
 claude --strict-mcp-config --mcp-config examples/factory/.mcp.json
 ```
 
-The server generates read/pivot/set/aggregate tools and `create_contact_task` from the model. Agents filter returned objects in their own code execution environment and pass selected IDs to the next tool. `pivot_shipment_lines` returns each line set, `intersect_shipment_line` retains their common evidence, and the agent sums its units before passing its IDs to the Action. The MCP test in `scenario.test.ts` exercises this sequence; the factory model defines no Function that completes the exploration for the caller. Runtime contracts are in [IMPLEMENTATION.md](../../IMPLEMENTATION.md). This example assumes one writer and visibility of all resources relevant to a decision.
+The server generates read/pivot/set/aggregate tools and `create_contact_task` from the model. Agents filter returned objects in their own code execution environment and pass selected IDs to the next tool. `pivot_shipment_lines` returns each line set, `intersect_shipment_line` retains their common evidence, and `aggregate_shipment_line` sums its units before the agent passes the evidence IDs to the Action. The MCP test in `scenario.test.ts` exercises this sequence; the factory model defines no Function that completes the exploration for the caller. Runtime contracts are in [IMPLEMENTATION.md](../../IMPLEMENTATION.md). This example assumes one writer and visibility of all resources relevant to a decision.

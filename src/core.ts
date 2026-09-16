@@ -603,8 +603,8 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
   intersect(a: ObjectSet, b: ObjectSet): ObjectSet { return query.combine('intersect', a, b) }
   subtract(a: ObjectSet, b: ObjectSet): ObjectSet { return query.combine('subtract', a, b) }
 
-  /** Results have count, plus sum when requested. The schema checks grouping and numeric fields. */
-  aggregate<O extends ObjectInstance>(set: ObjectSet<O>, options: { groupBy: string; sum?: string }): AggregationResult<O> {
+  /** Omit groupBy for a whole-set total (key: null); count is always present, sum is optional. */
+  aggregate<O extends ObjectInstance>(set: ObjectSet<O>, options: { groupBy?: string; sum?: string } = {}): AggregationResult<O> {
     const def = Object.hasOwn(this.ontology.objects, set.type) ? this.ontology.objects[set.type] : undefined
     if (!def) throw new Error(`unknown object type "${set.type}"`)
     return query.aggregate(set, options, def.properties)

@@ -72,12 +72,17 @@ const remaining = rt.subtract(orders, both)
 
 日時は、examples では `Date.parse(...)` の値を比較し、UTCオフセットが異なる表記も時点として比較します。保存された属性は文字列です。
 
-`aggregate(set, { groupBy, sum? })` は1つのスカラー属性でグループ化し、必ず `count`、任意で1つの数値属性の `sum` を求めます。結果は次の2つを持ちます。
+`aggregate(set, { groupBy?, sum? })` は必ず `count`、任意で1つの数値属性の `sum` を求めます。`groupBy` を省略すると集合全体を集計し、スカラー属性を指定するとグループごとに集計します。`aggregate(set)` だけなら全体の件数を返します。結果は次の2つを持ちます。
 
 - `set`：各グループに属する入力オブジェクトの集合。
-- `values`：スカラーの `key`、対応するオブジェクトの `pks`、`{ count: 2, sum: 5000 }` のような `metrics` を持つ行。
+- `values`：グループの `key`（スカラー、全体集計なら `null`）、対応するオブジェクトの `pks`、`{ count: 2, sum: 5000 }` のような `metrics` を持つ行。
+
+全体集計は空集合でも必ず1行を返し、その場合は `count` が0、指定した `sum` も0です。属性でグループ化した場合、空集合は0行になります。件数・合計はオブジェクトIDの重複を除いて計算し、複数経路で同じ対象に到達しても二重に数えません。
 
 ```ts
+const total = rt.aggregate(pending, { sum: 'total' })
+console.log(total.values[0].metrics) // 選んだ注文全体の件数・合計。key は null。
+
 const grouped = rt.aggregate(pending, { groupBy: 'status', sum: 'total' })
 const selected = rt.filter(grouped, (row) => row.metrics.sum >= 10000)
 console.log(selected.values) // 選択された行。集計値は元の値を保つ。
@@ -88,7 +93,7 @@ const targets = selected.set // その行に属する Order の集合
 
 リンクを使う集計や独自指標はモデルの Function に置き、同じ `AggregationResult<O>` を返せます。例えば金融では、**取引**から求めた `senderCount`・`transactionCount`・`totalAmount` を、対象の**口座**集合に対応させます。`aggregationResult(set, values)` は有限の数値、グループキーの一意性、メンバーの参照を検査し、対応する集合を作ります。`metrics` は `Readonly<Record<string, number>>` です。列名を揃える責任は結果を作る側にあります。タイプミスや列の欠落は検査せず、存在しない列の参照は実行時には `undefined` になります。
 
-行の `pks` は対象集合の ID であり、自動的に根拠レコードを意味するものではありません。根拠集合は Function の結果で集計と並べて返し、利用者が選んだ対象に対応するものを取り出します。集計はスカラー属性の optional・nullable・default を認識しますが、null・欠損値をキーにしたり合計したりすると例外になります。
+行の `pks` は対象集合の ID であり、自動的に根拠レコードを意味するものではありません。根拠集合は Function の結果で集計と並べて返し、利用者が選んだ対象に対応するものを取り出します。集計はスカラー属性の optional・nullable・default を認識しますが、属性のnull・欠損値をキーにしたり合計したりすると例外になります。全体集計の `key: null` はグループ化しないことを表し、属性値がnullのグループではありません。空の `pks` を許すのも、この全体集計の行だけです。
 
 ## MCP のクエリ入力
 
@@ -99,7 +104,7 @@ const targets = selected.set // その行に属する Order の集合
 | `search_<type>` | `{}`。このセッションから見える全オブジェクト。 |
 | `get_<type>` | `{ <primaryKey>: value }` |
 | `union/intersect/subtract_<type>` | `{ left: pks, right: pks }` |
-| `aggregate_<type>` | `{ pks, group_by, sum? }` |
+| `aggregate_<type>` | `{ pks, group_by?, sum? }`。`group_by` を省略すると全体集計。 |
 | `traverse_<link>` | `{ source: { type, pk, properties }, direction? }` |
 | `pivot_<link>` | `{ source: { type, pks }, direction? }` |
 

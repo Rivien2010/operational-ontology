@@ -27,9 +27,9 @@ export interface AggregationResult<O extends ObjectInstance = ObjectInstance> {
   readonly set: ObjectSet<O>
   readonly values: readonly AggregationRow[]
 }
-/** Keep numeric metrics separate from identity; metric names belong to the producer. */
+/** Keep numeric metrics separate from identity. A null key denotes an ungrouped total. */
 export interface AggregationRow {
-  readonly key: Scalar
+  readonly key: Scalar | null
   readonly pks: readonly string[]
   readonly metrics: Readonly<Record<string, number>>
 }
@@ -100,9 +100,11 @@ export function aggregationResult<O extends ObjectInstance>(
   const input = objectSet(set.type, set.objects)
   const known = new Set(input.objects.map((o) => o.pk))
   const included = new Set<string>()
-  const keys = new Set<Scalar>()
+  const keys = new Set<Scalar | null>()
   const rows = values.map((row) => {
-    if (!scalar(row.key) || keys.has(row.key) || !Array.isArray(row.pks) || row.pks.length === 0) {
+    // Only an ungrouped total can describe an empty selection (count/sum = 0).
+    if ((row.key !== null && !scalar(row.key)) || keys.has(row.key) || !Array.isArray(row.pks) ||
+        (row.pks.length === 0 && row.key !== null)) {
       throw new Error('invalid or duplicate aggregation group')
     }
     keys.add(row.key)
@@ -133,21 +135,27 @@ export function filterAggregation<O extends ObjectInstance>(
   return aggregationResult(result.set, result.values.filter(predicate))
 }
 
-/** Group existing snapshots by one property, retaining each group's members. */
+/** Omit groupBy to total the whole set; otherwise group by a property. Both retain member IDs. */
 export function aggregate<O extends ObjectInstance>(
-  set: ObjectSet<O>, options: { groupBy: string; sum?: string }, properties: Properties,
+  set: ObjectSet<O>, options: { groupBy?: string; sum?: string }, properties: Properties,
 ): AggregationResult<O> {
-  if (!own(properties, options.groupBy) || !fieldKind(properties[options.groupBy])) throw new Error('invalid groupBy property')
+  if (options.groupBy !== undefined && (!own(properties, options.groupBy) || !fieldKind(properties[options.groupBy]))) throw new Error('invalid groupBy property')
   if (options.sum !== undefined && (!own(properties, options.sum) || fieldKind(properties[options.sum]) !== 'number')) {
     throw new Error('sum requires a numeric property')
   }
   const input = objectSet(set.type, set.objects)
   // Count unique objects, not paths that reached them. Sum also uses this object
   // grain: aggregate transfers before pivoting to deduplicated recipient accounts.
-  const groups = new Map<Scalar, { key: Scalar; pks: string[]; metrics: Record<string, number> }>()
+  const groups = new Map<Scalar | null, { key: Scalar | null; pks: string[]; metrics: Record<string, number> }>()
+  // Seed the total so even an empty input returns one row with zero metrics.
+  if (options.groupBy === undefined) groups.set(null, { key: null, pks: [], metrics: options.sum === undefined ? { count: 0 } : { count: 0, sum: 0 } })
   for (const object of input.objects) {
-    const key = object.properties[options.groupBy]
-    if (!scalar(key)) throw new Error('groupBy requires a non-null scalar value')
+    let key: Scalar | null = null
+    if (options.groupBy !== undefined) {
+      const value = object.properties[options.groupBy]
+      if (!scalar(value)) throw new Error('groupBy requires a non-null scalar value')
+      key = value
+    }
     const row = groups.get(key) ?? { key, pks: [], metrics: options.sum === undefined ? { count: 0 } : { count: 0, sum: 0 } }
     row.pks.push(object.pk)
     row.metrics.count++

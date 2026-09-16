@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { buildMcpServer } from '../../src/mcp.js'
-import { objectSet, type ObjectSet } from '../../src/core.js'
+import { objectSet, type AggregationResult, type ObjectSet } from '../../src/core.js'
 import { integrate } from './integrate.js'
 import { createFactory } from './runtime.js'
 
@@ -31,7 +31,9 @@ test('factory investigates a supplied manufacturing window and records shipped-l
   const shipments = rt.filter(rt.pivot(affected, 'shipmentLines', { actor }), (object) => object.properties.status === 'shipped')
   const lines = rt.intersect(affected, rt.pivot(shipments, 'shipmentLines', { actor }))
   assert.deepEqual(ids(lines.objects), ['SL1', 'SL3', 'SL4'])
-  assert.equal(lines.objects.reduce((sum, line) => sum + (line.properties.units as number), 0), 50)
+  assert.deepEqual(rt.aggregate(lines, { sum: 'units' }).values, [
+    { key: null, pks: ['SL1', 'SL3', 'SL4'], metrics: { count: 3, sum: 50 } },
+  ])
   assert.deepEqual(ids(shipments.objects), ['S1', 'S2'])
   assert.equal(shipments.objects.every((s) => s.properties.status === 'shipped'), true)
   assert.deepEqual(ids(rt.pivot(shipments, 'customerShipments', { actor }).objects), ['C1'])
@@ -61,7 +63,9 @@ test('factory exploration deduplicates converging production paths without losin
   assert.deepEqual(ids(lots.objects), ['L1', 'L2', 'L3'])
   const lines = rt.pivot(lots, 'lotLines', { actor })
   assert.deepEqual(ids(lines.objects), ['SL1', 'SL3', 'SL5', 'SL2', 'SL4'])
-  assert.equal(lines.objects.reduce((sum, line) => sum + (line.properties.units as number), 0), 75)
+  assert.deepEqual(rt.aggregate(lines, { sum: 'units' }).values, [
+    { key: null, pks: ['SL1', 'SL3', 'SL5', 'SL2', 'SL4'], metrics: { count: 5, sum: 75 } },
+  ])
   assert.deepEqual(rt.auditLog(), [])
 })
 
@@ -93,7 +97,7 @@ for (const status of ['pending', 'held']) {
   })
 }
 
-test('MCP clients discover factory evidence through client filters, pivots and intersection before recording it', async (t) => {
+test('MCP clients discover factory evidence through client filters, pivots, intersection and whole-set aggregation', async (t) => {
   const app = setup(t)
   const server = buildMcpServer(app.rt, { agent: 'investigator' })
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
@@ -125,7 +129,8 @@ test('MCP clients discover factory evidence through client filters, pivots and i
   const packed = await call<ObjectSet>('pivot_shipment_lines', { source: { type: 'Shipment', pks: ids(shipments) } })
   const evidence = await call<ObjectSet>('intersect_shipment_line', { left: ids(lines.objects), right: ids(packed.objects) })
   assert.deepEqual(ids(evidence.objects), ['SL1', 'SL3', 'SL4'])
-  assert.equal(evidence.objects.reduce((sum, line) => sum + (line.properties.units as number), 0), 50)
+  const impact = await call<AggregationResult>('aggregate_shipment_line', { pks: ids(evidence.objects), sum: 'units' })
+  assert.deepEqual(impact.values, [{ key: null, pks: ['SL1', 'SL3', 'SL4'], metrics: { count: 3, sum: 50 } }])
   assert.deepEqual(app.rt.auditLog(), [])
   await call('create_contact_task', {
     customerId: customers.objects[0].pk, equipmentId: equipment[0].pk, taskId: 'MCP-CONTACT', ...window,

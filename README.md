@@ -30,16 +30,6 @@ The demo follows the [accompanying article](https://www.dataengineeringweekly.co
 - `assignOrder` and `addOrderNote` store state owned by the ontology, which survives re-indexing while source data refreshes;
 - applied and rejected action attempts appear in the audit log.
 
-Three further examples follow relationships and conditions to find the objects to act on, then record the decision and its evidence:
-
-| Example | Business question and response | Run |
-| --- | --- | --- |
-| [Factory](./examples/factory/README.md) | Which customers received potentially affected lots? Create a contact/reinspection task. | `pnpm demo:factory` |
-| [Hospital](./examples/hospital/README.md) | Which bed and nurse meet a patient's requirements? Record a provisional allocation. | `pnpm demo:hospital` |
-| [Finance](./examples/finance/README.md) | Which recipients are shared by selected accounts? Record a case and its evidence transfers. | `pnpm demo:finance` |
-
-These synthetic examples combine set exploration with domain rules in the model. Finding a candidate or common relationship does not itself establish a decision or change the business state.
-
 https://github.com/user-attachments/assets/02bb8ca0-a476-4e33-b0ea-25c46c6e9dda
 
 ## Why define Operational Ontology?
@@ -138,6 +128,20 @@ const ontology = defineOntology({
 Calling `execute('cancelOrder', …)` loads the target and checks the rule. For an allowed write, the runtime validates the edit plan, writes it back, then commits the local edits and audit entry. The effects function only describes changes; the adapter performs the external write.
 
 <img src="./assets/action-gate.svg" alt="Every caller — human or AI agent — invokes the named action cancelOrder through the same governed gate. The precondition refuses shipped orders with a machine-readable error; an applied call transitions the status. Every attempt, applied or refused, lands in the audit log. A generic UPDATE path is absent by design.">
+
+## Use cases: data-driven operations
+
+An equipment anomaly, a patient admission request, a transaction alert. Operational teams respond by bringing information together, deciding who or what to act on and on what evidence, and repeating those decisions and actions as conditions change. We call this workflow **data-driven operations**.
+
+The three examples below use Operational Ontology to identify the objects to act on and the supporting evidence, then use an Action to recheck conditions and record a task, provisional allocation, or investigation case.
+
+| Example | Business question and response | Run |
+| --- | --- | --- |
+| [Factory](./examples/factory/README.md) | Which customers received potentially affected lots? Create a contact/reinspection task. | `pnpm demo:factory` |
+| [Hospital](./examples/hospital/README.md) | Which bed and nurse meet a patient's requirements? Record a provisional allocation. | `pnpm demo:hospital` |
+| [Finance](./examples/finance/README.md) | Which recipients are shared by selected accounts? Record a case and its evidence transfers. | `pnpm demo:finance` |
+
+These synthetic examples combine set exploration with domain rules in the model. Finding a candidate or common relationship does not itself establish a decision or change the business state.
 
 ## For AI agents (MCP)
 

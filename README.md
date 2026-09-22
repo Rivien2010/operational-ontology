@@ -212,4 +212,8 @@ Because business rules are code, and rule-expression languages embedded in YAML 
 - **DDD, CQRS, and event sourcing:** related ideas for entities, commands, guarded changes, and logs. Here the domain model is shared across consumers and sits over other systems' data.
 - **Earlier uses of the term:** Vladimir Kozlov's [definition essay](https://www.linkedin.com/pulse/operational-ontology-semantic-interface-between-data-action-kozlov-njnle) and [Foundry introduction](https://www.linkedin.com/pulse/understanding-palantirs-operational-ontology-beginners-kozlov-d0vse), and FSTech's [Operational Ontology Framework](https://github.com/fstech-digital/operational-ontology-framework). This repository states its own meaning through the four properties and runnable example above.
 
+## Author
+
+Written and maintained by [gura105](https://github.com/gura105) ([X](https://x.com/gura105)). Questions and counterexamples are welcome in [Discussions](https://github.com/gura105/operational-ontology/discussions).
+
 MIT © gura105

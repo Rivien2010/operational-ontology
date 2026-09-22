@@ -213,4 +213,8 @@ https://github.com/user-attachments/assets/2b811ee7-bff2-4694-b3bf-bf0f6ccc85d5
 - **DDD、CQRS、イベントソーシング：** エンティティ、コマンド、条件付きの変更、ログに関する関連概念。本実装では、他システムのデータの上にあるドメインモデルを複数の消費者で共有します。
 - **この用語の先行使用：** Vladimir Kozlov の[定義エッセイ](https://www.linkedin.com/pulse/operational-ontology-semantic-interface-between-data-action-kozlov-njnle)と [Foundry 入門](https://www.linkedin.com/pulse/understanding-palantirs-operational-ontology-beginners-kozlov-d0vse)、FSTech の [Operational Ontology Framework](https://github.com/fstech-digital/operational-ontology-framework)。このリポジトリでの意味は、前述の4つの性質と動く実装で示しています。
 
+## Author（作者）
+
+作者・メンテナ: [gura105](https://github.com/gura105)（[X](https://x.com/gura105)）。質問や反例は [Discussions](https://github.com/gura105/operational-ontology/discussions) で受け付けています。
+
 MIT © gura105

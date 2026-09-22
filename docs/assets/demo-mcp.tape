@@ -1,11 +1,11 @@
 # Recording of an agent meeting the ontology's rules over MCP — one continuous,
 # uncut interactive session. Reproduce with:
-#   brew install vhs && vhs assets/demo-mcp.tape   (from the repo root)
+#   brew install vhs && vhs docs/assets/demo-mcp.tape   (from the repo root)
 # `pnpm agent` is Claude Code, connected to this repo's .mcp.json (server "orders",
 # command: pnpm mcp) and restricted to it (--strict-mcp-config). A small fast model
 # was selected for the recording session. The only edit: the CLI's login banner
 # (account name/email) is pixelized in post with ffmpeg — no frames are cut.
-Output assets/demo-mcp.gif
+Output docs/assets/demo-mcp.gif
 
 Set FontSize 18
 Set Width 1360

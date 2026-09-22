@@ -49,4 +49,4 @@ C1 は対象ロットの出荷先なので見つかります。C2 の L2 は9月
 claude --strict-mcp-config --mcp-config examples/factory/.mcp.json
 ```
 
-モデルから読み取り・pivot・集合演算・集計のツールと `create_contact_task` を生成します。エージェントは自身のコード実行環境で取得済みオブジェクトを絞り、選んだIDを次のツールへ渡します。`pivot_shipment_lines` で各明細集合を得て、`intersect_shipment_line` で共通する根拠を残し、`aggregate_shipment_line` で数量を合計してから根拠のIDを Action に渡します。`scenario.test.ts` の MCP テストでこの流れを確認できます。工場モデルには利用者に代わって探索を完了する Function は定義していません。契約は [IMPLEMENTATION.ja.md](../../IMPLEMENTATION.ja.md) にあります。単一の書き込み元と、判断に関係する全資源が見えることを前提とします。
+モデルから読み取り・pivot・集合演算・集計のツールと `create_contact_task` を生成します。エージェントは自身のコード実行環境で取得済みオブジェクトを絞り、選んだIDを次のツールへ渡します。`pivot_shipment_lines` で各明細集合を得て、`intersect_shipment_line` で共通する根拠を残し、`aggregate_shipment_line` で数量を合計してから根拠のIDを Action に渡します。`scenario.test.ts` の MCP テストでこの流れを確認できます。工場モデルには利用者に代わって探索を完了する Function は定義していません。契約は [IMPLEMENTATION.ja.md](../../docs/IMPLEMENTATION.ja.md) にあります。単一の書き込み元と、判断に関係する全資源が見えることを前提とします。

@@ -57,4 +57,4 @@ Run `pnpm mcp:hospital`, or connect from the repository root:
 claude --strict-mcp-config --mcp-config examples/hospital/.mcp.json
 ```
 
-The model supplies `bed_search`, `nurse_search` and `allocate` alongside generated exploration tools. The caller supplies patient/bed choices; it does not implement eligibility rules. See [IMPLEMENTATION.md](../../IMPLEMENTATION.md) for the shared API and failure contracts. Agents filter returned patients and admission records in their own code execution environment; candidate eligibility remains in the model.
+The model supplies `bed_search`, `nurse_search` and `allocate` alongside generated exploration tools. The caller supplies patient/bed choices; it does not implement eligibility rules. See [IMPLEMENTATION.md](../../docs/IMPLEMENTATION.md) for the shared API and failure contracts. Agents filter returned patients and admission records in their own code execution environment; candidate eligibility remains in the model.

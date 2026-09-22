@@ -1,6 +1,6 @@
 # Recording of the demo for the README. Reproduce with:
-#   brew install vhs && vhs assets/demo.tape   (from the repo root)
-Output assets/demo.gif
+#   brew install vhs && vhs docs/assets/demo.tape   (from the repo root)
+Output docs/assets/demo.gif
 
 Set FontSize 18
 Set Width 1360

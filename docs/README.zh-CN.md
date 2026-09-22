@@ -1,9 +1,9 @@
-[English](./README.md) | [日本語](./README.ja.md) | **简体中文**
+[English](../README.md) | [日本語](./README.ja.md) | **简体中文**
 
 # Operational Ontology
 
 [![CI](https://github.com/gura105/operational-ontology/actions/workflows/ci.yml/badge.svg)](https://github.com/gura105/operational-ontology/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 > **Operational Ontology（可操作的本体）是建立在其他系统数据之上的共享领域模型：通过对象和链接读取业务，通过动作（Action）执行业务规则、审计操作尝试，并将变更写回权威记录系统（system of record）。**
 >
@@ -81,7 +81,7 @@ https://github.com/user-attachments/assets/02bb8ca0-a476-4e33-b0ea-25c46c6e9dda
 
 将模型表示为数据而非类，是为了能够枚举描述操作所需的信息。仅有 `class Order { cancel() {} }` 中的方法签名，无法获取参数校验规则或前置条件。本实现将这些信息保留在定义值中，让应用可以共享模型、在运行时检查模型，并从中生成 MCP 工具。
 
-以下片段将取消规则与动作参数及其描述的编辑放在一起。import 和完整模型见 [`examples/orders/ontology.ts`](./examples/orders/ontology.ts)。
+以下片段将取消规则与动作参数及其描述的编辑放在一起。import 和完整模型见 [`examples/orders/ontology.ts`](../examples/orders/ontology.ts)。
 
 ```ts
 const objects = {
@@ -137,9 +137,9 @@ const ontology = defineOntology({
 
 | 示例 | 业务问题与应对 | 运行 |
 | --- | --- | --- |
-| [工厂（英文）](./examples/factory/README.md) | 哪些客户收到了可能受影响批次的货物？创建客户联系或复检任务。 | `pnpm demo:factory` |
-| [医院（英文）](./examples/hospital/README.md) | 哪张病床和哪位护士符合患者要求？记录临时分配。 | `pnpm demo:hospital` |
-| [金融（英文）](./examples/finance/README.md) | 所选账户有哪些共同收款方？记录调查案件及作为证据的转账。 | `pnpm demo:finance` |
+| [工厂（英文）](../examples/factory/README.md) | 哪些客户收到了可能受影响批次的货物？创建客户联系或复检任务。 | `pnpm demo:factory` |
+| [医院（英文）](../examples/hospital/README.md) | 哪张病床和哪位护士符合患者要求？记录临时分配。 | `pnpm demo:hospital` |
+| [金融（英文）](../examples/finance/README.md) | 所选账户有哪些共同收款方？记录调查案件及作为证据的转账。 | `pnpm demo:finance` |
 
 这些示例使用虚构数据，将集合探索与模型中的领域规则结合起来。找到候选对象或共同关系，本身并不意味着决策已经确定，也不会改变业务状态。
 
@@ -151,7 +151,7 @@ pnpm mcp     # 通过 stdio 提供同一个本体
 
 服务器从模型中生成 `search_order`、`traverse_customer_orders`、`cancel_order` 和 `read_audit_log` 等工具。智能体尝试取消已发货订单时，会与人类调用方一样收到 `SHIPPED_ORDER_CANNOT_BE_CANCELLED`。业务规则存在于模型中，因此无需依靠提示词强制执行规则。
 
-仓库的 [MCP 配置](./.mcp.json)连接订单示例。智能体在自己的代码执行环境中筛选返回的数据。[实现说明（英文）](./IMPLEMENTATION.md#mcp-query-inputs)介绍了这一流程和工具输入；[调用方身份（英文）](./IMPLEMENTATION.md#visibility-and-caller-identity)另有说明。
+仓库的 [MCP 配置](../.mcp.json)连接订单示例。智能体在自己的代码执行环境中筛选返回的数据。[实现说明（英文）](./IMPLEMENTATION.md#mcp-query-inputs)介绍了这一流程和工具输入；[调用方身份（英文）](./IMPLEMENTATION.md#visibility-and-caller-identity)另有说明。
 
 https://github.com/user-attachments/assets/28327062-e09f-4103-943e-434a0e55b327
 
@@ -161,15 +161,15 @@ https://github.com/user-attachments/assets/28327062-e09f-4103-943e-434a0e55b327
 
 | 文件 | 关注内容 |
 | --- | --- |
-| [`examples/orders/ontology.ts`](./examples/orders/ontology.ts) | 业务模型：对象、关系、所有权和动作规则。 |
-| [`examples/orders/demo.ts`](./examples/orders/demo.ts) | 从调用方视角观察读取、写入成功、拒绝和重新索引。 |
-| [`src/core.ts`](./src/core.ts) | 模型定义及其运行时：沿 `execute()` 查看校验、写回，以及编辑和审计的提交过程。 |
-| [`src/query.ts`](./src/query.ts) | 已求值的集合、筛选、集合运算和聚合。 |
-| [`examples/orders/integrate.ts`](./examples/orders/integrate.ts) | 如何将两套旧系统的数据结构转换为一份快照。 |
-| [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | 如何将已受理的变更送达源系统，包括拒绝基于过时状态的取消操作。 |
-| [`src/mcp.ts`](./src/mcp.ts) | 如何将同一个模型转换为智能体可用的工具。 |
+| [`examples/orders/ontology.ts`](../examples/orders/ontology.ts) | 业务模型：对象、关系、所有权和动作规则。 |
+| [`examples/orders/demo.ts`](../examples/orders/demo.ts) | 从调用方视角观察读取、写入成功、拒绝和重新索引。 |
+| [`src/core.ts`](../src/core.ts) | 模型定义及其运行时：沿 `execute()` 查看校验、写回，以及编辑和审计的提交过程。 |
+| [`src/query.ts`](../src/query.ts) | 已求值的集合、筛选、集合运算和聚合。 |
+| [`examples/orders/integrate.ts`](../examples/orders/integrate.ts) | 如何将两套旧系统的数据结构转换为一份快照。 |
+| [`examples/orders/erp-adapter.ts`](../examples/orders/erp-adapter.ts) | 如何将已受理的变更送达源系统，包括拒绝基于过时状态的取消操作。 |
+| [`src/mcp.ts`](../src/mcp.ts) | 如何将同一个模型转换为智能体可用的工具。 |
 
-[`tests/`](./tests/) 以可执行的形式表达公共契约的行为和类型预期；场景测试则放在各示例目录中的 `scenario.test.ts`。`pnpm test` 会运行两类测试。[实现说明（英文）](./IMPLEMENTATION.md)介绍 API 细节、处理顺序和边界情况。
+[`tests/`](../tests/) 以可执行的形式表达公共契约的行为和类型预期；场景测试则放在各示例目录中的 `scenario.test.ts`。`pnpm test` 会运行两类测试。[实现说明（英文）](./IMPLEMENTATION.md)介绍 API 细节、处理顺序和边界情况。
 
 ## 实现范围与行为声明
 

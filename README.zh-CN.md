@@ -212,4 +212,8 @@ https://github.com/user-attachments/assets/28327062-e09f-4103-943e-434a0e55b327
 - **DDD、CQRS 和事件溯源：** 与实体、命令、带条件检查的变更和日志相关的思想。在本实现中，领域模型由多个使用方共享，并建立在其他系统的数据之上。
 - **该术语的既有用法：** Vladimir Kozlov 的[定义文章（英文）](https://www.linkedin.com/pulse/operational-ontology-semantic-interface-between-data-action-kozlov-njnle)和 [Foundry 入门（英文）](https://www.linkedin.com/pulse/understanding-palantirs-operational-ontology-beginners-kozlov-d0vse)，以及 FSTech 的 [Operational Ontology Framework（英文）](https://github.com/fstech-digital/operational-ontology-framework)。本仓库通过上述四个特性和可运行示例说明自己对这一术语的定义。
 
+## 作者
+
+作者与维护者：[gura105](https://github.com/gura105)（[X](https://x.com/gura105)）。欢迎在 [Discussions](https://github.com/gura105/operational-ontology/discussions) 中提出问题和反例。
+
 MIT © gura105

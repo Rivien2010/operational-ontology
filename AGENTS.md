@@ -1,12 +1,12 @@
 # Repository workflow
 
-This is a small, readable reference implementation of Operational Ontology. Keep the runtime and examples easy to read; prefer focused changes over new abstractions. README explains the concept; IMPLEMENTATION explains runtime contracts.
+This is a small, readable reference implementation of Operational Ontology. Keep the runtime and examples easy to read; prefer focused changes over new abstractions. `README.md` explains the concept; `docs/IMPLEMENTATION.md` explains runtime contracts. Keep README translations and shared documentation assets in `docs/`, and example-specific docs beside their code.
 
 ## Development
 
 - `main` contains the published application; `next` collects work for the next release. Keep `main` as the default branch for readers.
 - Start ordinary work from the latest `origin/next`, on a separate branch. Target `next` explicitly when creating a PR (`gh pr create --base next`).
-- Keep commits focused. Update affected examples, tests, and both language versions of documentation with API changes.
+- Keep commits focused. Update affected examples, tests, and all existing language versions of affected documentation with API changes.
 - Run `pnpm typecheck`, `pnpm test`, and `pnpm demo` before merging changes. CI must pass.
 - Merging an ordinary PR does not request a release. Do not bump the version, create a version tag, or publish a Release for each PR.
 - Do not push directly to, delete, or force-push `main` or `next`. Do not bypass or weaken repository rules to complete a task.

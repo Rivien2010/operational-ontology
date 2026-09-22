@@ -1,4 +1,4 @@
-**English** | [日本語](./README.ja.md)
+**English** | [日本語](./docs/README.ja.md) | [简体中文](./docs/README.zh-CN.md)
 
 # Operational Ontology
 
@@ -9,7 +9,7 @@
 >
 > A semantic layer lets you *read* your business. An operational ontology lets you *run* it.
 
-<img src="./assets/hero-diagram.svg" alt="Reads travel from a shared model to agents, apps, and people. Writes enter through an audited action gate and write back to the systems of record that own the state.">
+<img src="./docs/assets/hero-diagram.svg" alt="Reads travel from a shared model to agents, apps, and people. Writes enter through an audited action gate and write back to the systems of record that own the state.">
 
 This repository makes that definition runnable in a small TypeScript reference implementation. Palantir Foundry's Ontology is the pattern's starting point; this example isolates the ideas so you can read, fork, and adapt them. It is a learning resource, not a framework or an npm dependency.
 
@@ -63,7 +63,7 @@ Ownership has three forms in the example:
 - **ontology-owned:** the ontology owns the assignee and notes, which have no source columns.
 - **derived:** totals and counts are computed at query time and are never written.
 
-<img src="./assets/authority-map.svg" alt="An authority map for an Order object. Status and total are source-backed by the upstream order system and use a governed write-back path. Assignee and Note are ontology-owned, making the ontology datastore their single source of truth. Aggregates and counts are derived, computed only, and never written. State with no declared owner is forbidden.">
+<img src="./docs/assets/authority-map.svg" alt="An authority map for an Order object. Status and total are source-backed by the upstream order system and use a governed write-back path. Assignee and Note are ontology-owned, making the ontology datastore their single source of truth. Aggregates and counts are derived, computed only, and never written. State with no declared owner is forbidden.">
 
 ## The pattern in code
 
@@ -127,7 +127,7 @@ const ontology = defineOntology({
 
 Calling `execute('cancelOrder', …)` loads the target and checks the rule. For an allowed write, the runtime validates the edit plan, writes it back, then commits the local edits and audit entry. The effects function only describes changes; the adapter performs the external write.
 
-<img src="./assets/action-gate.svg" alt="Every caller — human or AI agent — invokes the named action cancelOrder through the same governed gate. The precondition refuses shipped orders with a machine-readable error; an applied call transitions the status. Every attempt, applied or refused, lands in the audit log. A generic UPDATE path is absent by design.">
+<img src="./docs/assets/action-gate.svg" alt="Every caller — human or AI agent — invokes the named action cancelOrder through the same governed gate. The precondition refuses shipped orders with a machine-readable error; an applied call transitions the status. Every attempt, applied or refused, lands in the audit log. A generic UPDATE path is absent by design.">
 
 ## Use cases: data-driven operations
 
@@ -151,7 +151,7 @@ pnpm mcp     # serve the same ontology over stdio
 
 The server generates tools such as `search_order`, `traverse_customer_orders`, `cancel_order`, and `read_audit_log` from the model. An agent cancelling a shipped order receives `SHIPPED_ORDER_CANNOT_BE_CANCELLED`, just as a human caller does. Business rules live in the model, so the prompt does not have to enforce them.
 
-The repository's [MCP configuration](./.mcp.json) connects the orders example. Agents filter returned data in their own code execution environment. The [implementation notes](./IMPLEMENTATION.md#mcp-query-inputs) describe this flow and tool inputs; [caller identity](./IMPLEMENTATION.md#visibility-and-caller-identity) is documented separately.
+The repository's [MCP configuration](./.mcp.json) connects the orders example. Agents filter returned data in their own code execution environment. The [implementation notes](./docs/IMPLEMENTATION.md#mcp-query-inputs) describe this flow and tool inputs; [caller identity](./docs/IMPLEMENTATION.md#visibility-and-caller-identity) is documented separately.
 
 https://github.com/user-attachments/assets/28327062-e09f-4103-943e-434a0e55b327
 
@@ -169,7 +169,7 @@ Start with the first three files; use the others to follow a particular part of 
 | [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | How an accepted change reaches its source, including refusal of a stale cancellation. |
 | [`src/mcp.ts`](./src/mcp.ts) | How the same model becomes the agent's tool surface. |
 
-[`tests/`](./tests/) makes the shared behavior and typing expectations executable; scenario tests live alongside their examples as `scenario.test.ts`. `pnpm test` runs both. The [implementation notes](./IMPLEMENTATION.md) explain API details, processing order, and edge cases.
+[`tests/`](./tests/) makes the shared behavior and typing expectations executable; scenario tests live alongside their examples as `scenario.test.ts`. `pnpm test` runs both. The [implementation notes](./docs/IMPLEMENTATION.md) explain API details, processing order, and edge cases.
 
 ## Scope and declared behavior
 
@@ -177,7 +177,7 @@ This repository implements the middle layer. The demo supplies the surrounding a
 
 State absent from the sources, such as assignees and notes, and the record of action attempts need to be kept in this layer. This implementation therefore owns a store for action edits and the audit log alongside the indexed source snapshots.
 
-<img src="./assets/where-this-sits.svg" alt="Three layers — applications, the operational ontology, and the data layer — each mapped to its implementation in Foundry and in this repository. This repository implements the middle layer, which owns its own store. At the ontology–data seam sit the two contracts: integrated physical data is given, and write-back is a governed side effect.">
+<img src="./docs/assets/where-this-sits.svg" alt="Three layers — applications, the operational ontology, and the data layer — each mapped to its implementation in Foundry and in this repository. This repository implements the middle layer, which owns its own store. At the ontology–data seam sit the two contracts: integrated physical data is given, and write-back is a governed side effect.">
 
 An implementation must declare choices that callers can observe. This one makes the following choices, also exposed as `Runtime.declarations`:
 
@@ -190,7 +190,7 @@ An implementation must declare choices that callers can observe. This one makes 
 
 The runtime demonstrates the pattern with synchronous action execution and SQLite. It includes no UI builder, pipeline framework, scalable indexing service, or general authorization system. The write gate is an API contract within the caller's process. These boundaries keep the implementation readable.
 
-Creation is limited to ontology-owned objects; deletes, link properties, and composite keys are unsupported. The [implementation notes](./IMPLEMENTATION.md#current-limits) document the remaining limits and API details. Published versions are in the [release notes](https://github.com/gura105/operational-ontology/releases).
+Creation is limited to ontology-owned objects; deletes, link properties, and composite keys are unsupported. The [implementation notes](./docs/IMPLEMENTATION.md#current-limits) document the remaining limits and API details. Published versions are in the [release notes](https://github.com/gura105/operational-ontology/releases).
 
 ## FAQ
 
@@ -211,5 +211,9 @@ Because business rules are code, and rule-expression languages embedded in YAML 
 - **Palantir Foundry Ontology:** the pattern's starting point; see its [semantic/kinetic model](https://www.palantir.com/docs/foundry/ontology/overview), [action types](https://www.palantir.com/docs/foundry/action-types/overview), and [write-back webhooks](https://www.palantir.com/docs/foundry/action-types/webhooks).
 - **DDD, CQRS, and event sourcing:** related ideas for entities, commands, guarded changes, and logs. Here the domain model is shared across consumers and sits over other systems' data.
 - **Earlier uses of the term:** Vladimir Kozlov's [definition essay](https://www.linkedin.com/pulse/operational-ontology-semantic-interface-between-data-action-kozlov-njnle) and [Foundry introduction](https://www.linkedin.com/pulse/understanding-palantirs-operational-ontology-beginners-kozlov-d0vse), and FSTech's [Operational Ontology Framework](https://github.com/fstech-digital/operational-ontology-framework). This repository states its own meaning through the four properties and runnable example above.
+
+## Author
+
+Written and maintained by [gura105](https://github.com/gura105) ([X](https://x.com/gura105)). Questions and counterexamples are welcome in [Discussions](https://github.com/gura105/operational-ontology/discussions).
 
 MIT © gura105

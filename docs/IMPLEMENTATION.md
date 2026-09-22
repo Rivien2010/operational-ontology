@@ -2,7 +2,7 @@
 
 # Implementation notes
 
-The [README](./README.md) introduces the pattern, demo, and scope. This document describes this implementation's API and runtime behavior. Shared runtime, type-level, and MCP checks are in [`tests/`](./tests/); scenario tests are in `examples/*/scenario.test.ts`. `pnpm test` runs both.
+The [README](../README.md) introduces the pattern, demo, and scope. This document describes this implementation's API and runtime behavior. Shared runtime, type-level, and MCP checks are in [`tests/`](../tests/); scenario tests are in `examples/*/scenario.test.ts`. `pnpm test` runs both.
 
 An action execution refusal returns `{ ok: false, error: { code, message } }` and is audited. Programming and storage errors may throw; the write path records them as described below. Query errors are exceptions rather than action refusals.
 
@@ -126,7 +126,7 @@ const customers = await call<ObjectSet>('pivot_customer_orders', {
 
 For aggregate results, filter `.values` locally and deduplicate the selected rows' `pks`. Pass those IDs to a pivot, set operation or aggregation; the server does not accept a whole aggregation for filtering. Metrics remain snapshots from the earlier analysis. Each tool reloads IDs under the session actor, so an earlier result cannot grant access to an object that has since become hidden or disappeared. Actions independently recheck current business conditions and evidence. Candidate eligibility remains in model Functions and Actions; local filtering expresses the caller's investigation choices.
 
-The [finance MCP scenario test](./examples/finance/scenario.test.ts) demonstrates this client flow, including the `call<T>` helper, local date/metric filtering and an Action. A client's code may import the pure `filterObjects` / `filterAggregation` helpers from `query.ts` to retain the set envelope, but these helpers are not required to select IDs from returned JSON.
+The [finance MCP scenario test](../examples/finance/scenario.test.ts) demonstrates this client flow, including the `call<T>` helper, local date/metric filtering and an Action. A client's code may import the pure `filterObjects` / `filterAggregation` helpers from `query.ts` to retain the set envelope, but these helpers are not required to select IDs from returned JSON.
 
 ## Visibility and caller identity
 
@@ -166,7 +166,7 @@ Function implementations must use the caller's actor for their reads and must no
 
 Candidate evaluation and Action preconditions can share ordinary model functions. A Function can return eligibility or proposed changes; the Action checks business conditions and the edit plan against current indexed state when it executes. Function results do not reserve resources or guarantee the validity of the complete edit plan.
 
-The examples show [customer impact and contact tasks](./examples/factory/README.md), [candidate evaluation and allocation](./examples/hospital/README.md), and [recipient summaries and investigation cases](./examples/finance/README.md). They document how exploration supplies Action evidence, how Functions evaluate candidates or compare metrics, and how Actions recheck and save selections. Stored evidence links retain record identities, not immutable copies of source record contents.
+The examples show [customer impact and contact tasks](../examples/factory/README.md), [candidate evaluation and allocation](../examples/hospital/README.md), and [recipient summaries and investigation cases](../examples/finance/README.md). They document how exploration supplies Action evidence, how Functions evaluate candidates or compare metrics, and how Actions recheck and save selections. Stored evidence links retain record identities, not immutable copies of source record contents.
 
 ## The authority line, checked
 
@@ -203,7 +203,7 @@ The audit write itself must not be a failure point. Params whose values would ch
 
 The audit log sits outside the object graph because its contract differs from that of ordinary business objects. It records refusals and crashes that commit no business edits, retains a record using placeholders for values it cannot encode, and is appended to by the runtime without going through an action. Treating entries as ordinary objects would require exceptions to schema-based refusal and action-gated writes, so this implementation exposes them through a separate administrative view.
 
-**Preconditions and freshness.** Rules see the indexed snapshot plus applied local edits. The source may have changed since indexing; the runtime does not re-check source invariants itself. The adapter must handle that boundary. The demo's [ERP adapter](./examples/orders/erp-adapter.ts) uses a guarded `UPDATE`, allowing the ERP to refuse a cancellation after an order has shipped.
+**Preconditions and freshness.** Rules see the indexed snapshot plus applied local edits. The source may have changed since indexing; the runtime does not re-check source invariants itself. The adapter must handle that boundary. The demo's [ERP adapter](../examples/orders/erp-adapter.ts) uses a guarded `UPDATE`, allowing the ERP to refuse a cancellation after an order has shipped.
 
 **Concurrency.** Action execution and the adapter interface are synchronous. The example assumes a single writer, so no other action interleaves between preflight and commit. An asynchronous adapter or multiple writers would require an explicit concurrency mechanism; neither is implemented here.
 

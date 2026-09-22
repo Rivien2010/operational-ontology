@@ -74,4 +74,4 @@ Action は選んだ全取引について、現在も指定した起点からの�
 claude --strict-mcp-config --mcp-config examples/finance/.mcp.json
 ```
 
-エージェントは自身のコード実行環境で、返された取引や `recipient_summary` の集計行を絞り込みます。選んだIDをpivot・集合演算へ、選んだ根拠を `open_investigation` へ渡し、filterのコードはサーバーへ送りません。`scenario.test.ts` のMCPテストでこの流れを確認できます。Action は呼び出し元が渡す集計値とは独立して根拠を検査します。共通の契約は [IMPLEMENTATION.ja.md](../../IMPLEMENTATION.ja.md) にあります。
+エージェントは自身のコード実行環境で、返された取引や `recipient_summary` の集計行を絞り込みます。選んだIDをpivot・集合演算へ、選んだ根拠を `open_investigation` へ渡し、filterのコードはサーバーへ送りません。`scenario.test.ts` のMCPテストでこの流れを確認できます。Action は呼び出し元が渡す集計値とは独立して根拠を検査します。共通の契約は [IMPLEMENTATION.ja.md](../../docs/IMPLEMENTATION.ja.md) にあります。

@@ -1,9 +1,9 @@
-[English](./README.md) | **日本語**
+[English](../README.md) | **日本語** | [简体中文](./README.zh-CN.md)
 
 # Operational Ontology
 
 [![CI](https://github.com/gura105/operational-ontology/actions/workflows/ci.yml/badge.svg)](https://github.com/gura105/operational-ontology/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
 > **Operational Ontology（操作できるオントロジー）とは、他システムのデータの上に築く共有ドメインモデルです。オブジェクトとリンクで業務を読み取り、アクションで業務ルールを検査し、試行を監査し、変更をシステムオブレコードへ書き戻します。**
 >
@@ -82,7 +82,7 @@ edits は、アクションが記述するオブジェクトやリンクへの�
 
 モデルをクラスではなくデータで表すのは、操作に必要な情報を列挙できるようにするためです。`class Order { cancel() {} }` のメソッドシグネチャだけでは、パラメータの検証規則や事前条件は取り出せません。この実装はそれらを定義の値として持たせ、複数のアプリから同じモデルを使い、実行時に内容を調べたり MCP ツールを生成したりできる形にしています。
 
-次の抜粋では、キャンセルの条件を、アクションのパラメータと変更内容とともに定義しています。import とモデル全体は [`examples/orders/ontology.ts`](./examples/orders/ontology.ts) にあります。
+次の抜粋では、キャンセルの条件を、アクションのパラメータと変更内容とともに定義しています。import とモデル全体は [`examples/orders/ontology.ts`](../examples/orders/ontology.ts) にあります。
 
 ```ts
 const objects = {
@@ -138,9 +138,9 @@ const ontology = defineOntology({
 
 | 例 | 業務上の問いと対応 | 実行 |
 | --- | --- | --- |
-| [工場](./examples/factory/README.ja.md) | 影響が疑われるロットの出荷先はどこか。顧客連絡・再検査の検討タスクを作る。 | `pnpm demo:factory` |
-| [病院](./examples/hospital/README.ja.md) | 患者の要件を満たす病床と看護師はどれか。仮割当を記録する。 | `pnpm demo:hospital` |
-| [金融](./examples/finance/README.ja.md) | 対象口座に共通する受取先はどこか。根拠取引とともに調査ケースを記録する。 | `pnpm demo:finance` |
+| [工場](../examples/factory/README.ja.md) | 影響が疑われるロットの出荷先はどこか。顧客連絡・再検査の検討タスクを作る。 | `pnpm demo:factory` |
+| [病院](../examples/hospital/README.ja.md) | 患者の要件を満たす病床と看護師はどれか。仮割当を記録する。 | `pnpm demo:hospital` |
+| [金融](../examples/finance/README.ja.md) | 対象口座に共通する受取先はどこか。根拠取引とともに調査ケースを記録する。 | `pnpm demo:finance` |
 
 いずれも架空のデータを使い、集合の探索とモデルに定義した業務ルールを組み合わせます。候補や共通する関係が見つかっただけでは、判断の確定や業務状態の変更にはなりません。
 
@@ -152,7 +152,7 @@ pnpm mcp     # 同じオントロジーを stdio 経由で公開
 
 モデルから `search_order`、`traverse_customer_orders`、`cancel_order`、`read_audit_log` などのツールが生成されます。エージェントが出荷済み注文をキャンセルすると、人間の呼び出しと同じく `SHIPPED_ORDER_CANNOT_BE_CANCELLED` が返ります。業務ルールはモデルにあるため、プロンプトにルールの強制を任せる必要がありません。
 
-リポジトリの [MCP 設定](./.mcp.json)で注文デモに接続できます。取得したデータのfilterはエージェント自身のコード実行環境で行います。その流れと入力形式は[実装ノート](./IMPLEMENTATION.ja.md#mcp-のクエリ入力)、呼び出し元の扱いは[identityの説明](./IMPLEMENTATION.ja.md#可視性と呼び出し元の-identity)を参照してください。
+リポジトリの [MCP 設定](../.mcp.json)で注文デモに接続できます。取得したデータのfilterはエージェント自身のコード実行環境で行います。その流れと入力形式は[実装ノート](./IMPLEMENTATION.ja.md#mcp-のクエリ入力)、呼び出し元の扱いは[identityの説明](./IMPLEMENTATION.ja.md#可視性と呼び出し元の-identity)を参照してください。
 
 https://github.com/user-attachments/assets/2b811ee7-bff2-4694-b3bf-bf0f6ccc85d5
 
@@ -162,15 +162,15 @@ https://github.com/user-attachments/assets/2b811ee7-bff2-4694-b3bf-bf0f6ccc85d5
 
 | ファイル | 読むポイント |
 | --- | --- |
-| [`examples/orders/ontology.ts`](./examples/orders/ontology.ts) | オブジェクト・関係・所有・アクションのルールという業務モデル。 |
-| [`examples/orders/demo.ts`](./examples/orders/demo.ts) | 読み取り、書き込みの成功と拒否、再インデックスを呼び出し側から確認する。 |
-| [`src/core.ts`](./src/core.ts) | モデルの定義と実行処理。`execute()` から検証・書き戻し・編集と監査のコミットを辿る。 |
-| [`src/query.ts`](./src/query.ts) | 取得済みの集合、filter、集合演算、集計。 |
-| [`examples/orders/integrate.ts`](./examples/orders/integrate.ts) | 2つのレガシースキーマから1つのスナップショットを作る処理。 |
-| [`examples/orders/erp-adapter.ts`](./examples/orders/erp-adapter.ts) | 受理した変更をソースに届ける処理。古くなったキャンセルの拒否もここで行う。 |
-| [`src/mcp.ts`](./src/mcp.ts) | 同じモデルをエージェント向けのツール群に変換する処理。 |
+| [`examples/orders/ontology.ts`](../examples/orders/ontology.ts) | オブジェクト・関係・所有・アクションのルールという業務モデル。 |
+| [`examples/orders/demo.ts`](../examples/orders/demo.ts) | 読み取り、書き込みの成功と拒否、再インデックスを呼び出し側から確認する。 |
+| [`src/core.ts`](../src/core.ts) | モデルの定義と実行処理。`execute()` から検証・書き戻し・編集と監査のコミットを辿る。 |
+| [`src/query.ts`](../src/query.ts) | 取得済みの集合、filter、集合演算、集計。 |
+| [`examples/orders/integrate.ts`](../examples/orders/integrate.ts) | 2つのレガシースキーマから1つのスナップショットを作る処理。 |
+| [`examples/orders/erp-adapter.ts`](../examples/orders/erp-adapter.ts) | 受理した変更をソースに届ける処理。古くなったキャンセルの拒否もここで行う。 |
+| [`src/mcp.ts`](../src/mcp.ts) | 同じモデルをエージェント向けのツール群に変換する処理。 |
 
-[`tests/`](./tests/) は共通仕様の動作と型の期待値を実行可能な形で示します。各例のシナリオテストは、その例のフォルダ内の `scenario.test.ts` に置き、`pnpm test` で両方を実行します。API の詳細、処理順序、例外条件は[実装ノート](./IMPLEMENTATION.ja.md)を参照してください。
+[`tests/`](../tests/) は共通仕様の動作と型の期待値を実行可能な形で示します。各例のシナリオテストは、その例のフォルダ内の `scenario.test.ts` に置き、`pnpm test` で両方を実行します。API の詳細、処理順序、例外条件は[実装ノート](./IMPLEMENTATION.ja.md)を参照してください。
 
 ## 実装の範囲と宣言
 
@@ -212,5 +212,9 @@ https://github.com/user-attachments/assets/2b811ee7-bff2-4694-b3bf-bf0f6ccc85d5
 - **Palantir Foundry Ontology：** パターンの抽出元。[semantic/kinetic のモデル](https://www.palantir.com/docs/foundry/ontology/overview)、[action types](https://www.palantir.com/docs/foundry/action-types/overview)、[write-back webhooks](https://www.palantir.com/docs/foundry/action-types/webhooks)を参照。
 - **DDD、CQRS、イベントソーシング：** エンティティ、コマンド、条件付きの変更、ログに関する関連概念。本実装では、他システムのデータの上にあるドメインモデルを複数の消費者で共有します。
 - **この用語の先行使用：** Vladimir Kozlov の[定義エッセイ](https://www.linkedin.com/pulse/operational-ontology-semantic-interface-between-data-action-kozlov-njnle)と [Foundry 入門](https://www.linkedin.com/pulse/understanding-palantirs-operational-ontology-beginners-kozlov-d0vse)、FSTech の [Operational Ontology Framework](https://github.com/fstech-digital/operational-ontology-framework)。このリポジトリでの意味は、前述の4つの性質と動く実装で示しています。
+
+## Author（作者）
+
+作者・メンテナ: [gura105](https://github.com/gura105)（[X](https://x.com/gura105)）。質問や反例は [Discussions](https://github.com/gura105/operational-ontology/discussions) で受け付けています。
 
 MIT © gura105

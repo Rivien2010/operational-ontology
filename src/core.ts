@@ -8,7 +8,7 @@
  *   - every write goes through an action: preconditions → effects → audit log
  *   - the API exposes no other write path — a contract on the API, not a
  *     privilege boundary against code holding the database handle (declared;
- *     see "Transaction ownership" in IMPLEMENTATION.md)
+ *     see "Transaction ownership" in docs/IMPLEMENTATION.md)
  *   - authority is declared in the model: source-backed state comes from the
  *     sources and write-back governs its changes; ontology-owned state lives
  *     here, needs no write-back, and survives re-indexing
@@ -60,7 +60,7 @@ export interface ObjectTypeDef<S extends Properties = Properties> {
    * validate, not transform: the runtime stores what a schema produced and
    * feeds it back through the same schema on later writes, so a transforming
    * schema would refuse or rewrite its own output — a declared contract (see
-   * "The storable boundary" in IMPLEMENTATION.md).
+   * "The storable boundary" in docs/IMPLEMENTATION.md).
    */
   properties: S
   /**
@@ -84,7 +84,7 @@ export interface ObjectTypeDef<S extends Properties = Properties> {
    * enforcement here demonstrates placement, not protection. A fail-closed
    * deployment makes this slot required rather than optional, on top of an
    * authenticated identity layer. See "Visibility and caller identity"
-   * in IMPLEMENTATION.md.
+   * in docs/IMPLEMENTATION.md.
    */
   visibility?: (ctx: { object: ObjectInstance<string, z.output<z.ZodObject<S>>>; actor: string }) => boolean
   /**
@@ -183,7 +183,7 @@ export function reject(code: string, message: string): Violation {
 /**
  * Edits are data: what an action wants to change, decoupled from how it is
  * applied. Links are edits too — actions can rewire the graph itself, not
- * just node properties. Deletes are out of scope; see IMPLEMENTATION.md.
+ * just node properties. Deletes are out of scope; see docs/IMPLEMENTATION.md.
  */
 export type Edit =
   | { op: 'modify'; object: string; pk: string; changes: Record<string, unknown> }
@@ -328,9 +328,9 @@ export function defineOntology<Model extends OntologyDef>(def: Model): Model {
 /**
  * Propagates an action's edits toward the systems of record, running BEFORE
  * the local commit — write-back-first, the declared failure semantics (see
- * "Failure semantics in detail" in IMPLEMENTATION.md). The adapter speaks
+ * "Failure semantics in detail" in docs/IMPLEMENTATION.md). The adapter speaks
  * only to the systems of record; that boundary is a declared contract, not
- * an enforced one (see "Transaction ownership" in IMPLEMENTATION.md). It
+ * an enforced one (see "Transaction ownership" in docs/IMPLEMENTATION.md). It
  * receives its own copies of the plan and the target object, so nothing it
  * mutates leaks back into the runtime.
  */
@@ -395,7 +395,7 @@ export interface TraverseOptions { actor: string; direction?: Direction }
  * the same move the model makes: a declaration you can read at runtime, not
  * prose you have to trust. Authority is the model's half of the bargain
  * (`owned`, `writeback`, checked per edit plan); the other three are the
- * runtime's. Each is unpacked in the README and IMPLEMENTATION.md.
+ * runtime's. Each is unpacked in the README and docs/IMPLEMENTATION.md.
  */
 export const declarations = {
   authority: 'model-declared-runtime-checked',
@@ -464,7 +464,7 @@ export class Runtime<Model extends OntologyDef = OntologyDef> {
    * base, reapply the edit layer. A snapshot speaks only for source-backed
    * state, so anything ontology-owned in it is refused, and an overlay
    * patch whose base row disappeared refuses the whole load. Details:
-   * "Re-indexing vs edits" in IMPLEMENTATION.md.
+   * "Re-indexing vs edits" in docs/IMPLEMENTATION.md.
    */
   load(snapshot: {
     objects?: Record<string, Record<string, unknown>[]>

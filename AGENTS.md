@@ -1,6 +1,6 @@
 # Repository workflow
 
-This is a small, readable reference implementation of Operational Ontology. Keep the runtime and examples easy to read; prefer focused changes over new abstractions. README explains the concept; IMPLEMENTATION explains runtime contracts.
+This is a small, readable reference implementation of Operational Ontology. Keep the runtime and examples easy to read; prefer focused changes over new abstractions. `README.md` explains the concept; `docs/IMPLEMENTATION.md` explains runtime contracts. Keep README translations and shared documentation assets in `docs/`, and example-specific docs beside their code.
 
 ## Development
 

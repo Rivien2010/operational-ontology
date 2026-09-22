@@ -74,4 +74,4 @@ Run `pnpm mcp:finance`, or connect from the repository root:
 claude --strict-mcp-config --mcp-config examples/finance/.mcp.json
 ```
 
-Agents use their own code execution environment to filter returned transfers and `recipient_summary` metric rows. They pass selected IDs to pivot/set tools and selected evidence to `open_investigation`; no filter code is sent to the server. The MCP test in `scenario.test.ts` demonstrates this flow. The Action checks evidence independently of caller-supplied metrics. See [IMPLEMENTATION.md](../../IMPLEMENTATION.md) for the common contracts.
+Agents use their own code execution environment to filter returned transfers and `recipient_summary` metric rows. They pass selected IDs to pivot/set tools and selected evidence to `open_investigation`; no filter code is sent to the server. The MCP test in `scenario.test.ts` demonstrates this flow. The Action checks evidence independently of caller-supplied metrics. See [IMPLEMENTATION.md](../../docs/IMPLEMENTATION.md) for the common contracts.

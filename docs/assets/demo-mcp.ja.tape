@@ -1,11 +1,11 @@
 # 日本語版: エージェントが MCP 越しにオントロジーのルールに出会う記録 — ノーカットの
 # インタラクティブセッション。再現方法:
-#   brew install vhs && vhs assets/demo-mcp.ja.tape   （リポジトリルートで）
+#   brew install vhs && vhs docs/assets/demo-mcp.ja.tape   （リポジトリルートで）
 # `pnpm agent` は Claude Code（このリポジトリの .mcp.json = orders サーバーに接続、
 # --strict-mcp-config で他を遮断）。収録セッションは小型の高速モデルを使用。
 # 唯一の編集は CLI ログインバナー（アカウント名/メール）の ffmpeg によるピクセル化で、
 # フレームのカットは無い。
-Output assets/demo-mcp.ja.gif
+Output docs/assets/demo-mcp.ja.gif
 
 Set FontSize 18
 Set Width 1360
